@@ -1,0 +1,235 @@
+# User Guide
+
+## Interface overview
+
+OrcaWeb is a three-step workflow: **Model → Settings → Slice**.
+
+### Model tab
+
+Upload your model by dragging it onto the drop zone or clicking to browse. Supported formats: **STL** (ASCII and binary), **3MF**, **STEP** (`.step`/`.stp`, tessellated by OCCT built into the slicer engine — no extra download), and **OBJ**.
+
+- Rotate: left-drag
+- Pan: right-drag / Ctrl+drag
+- Zoom: scroll wheel
+
+The 3D viewer shows the model on a virtual print bed sized to match the currently selected printer (e.g. 256×256 mm for Bambu Lab, 250×210 mm for Prusa MK4).
+
+#### 3MF files
+
+When you load a `.3mf` file, OrcaWeb automatically:
+
+1. Extracts the mesh geometry and converts it to binary STL for the slicer
+2. Reads any OrcaSlicer profile metadata bundled inside the archive (`Metadata/*.json` / `.config`)
+3. Merges the embedded settings — printer model, nozzle diameter, bed size, filament temperatures, process parameters — into the imported layer below your manual overrides, and shows a notice telling you how many settings were applied
+
+If the 3MF contains a machine profile with a `printable_area` field the bed visualisation updates to match.
+
+#### OBJ files
+
+When you load a `.obj` file, OrcaWeb converts it to binary STL using OrcaSlicer's own C++ parser (`objparser.cpp`) compiled into the WASM engine — the same code used by OrcaSlicer desktop.
+
+- Supported: triangulated meshes, quad faces (auto-triangulated), multi-object files (merged into one)
+- Not supported: NURBS / curves, MTL material files (geometry only — colors are ignored for slicing)
+- Conversion happens in the Web Worker; no extra WASM download required (reuses the slicer engine)
+
+#### STEP files
+
+When you load a `.step` or `.stp` file, OrcaWeb uses Open CASCADE Technology (OCCT 7.8.1) compiled directly into the slicer engine to tessellate the CAD geometry into a triangle mesh, then converts it to binary STL.
+
+- No extra download — OCCT is part of `slicer.wasm`
+- Conversion runs in the slicer Web Worker alongside OBJ and STL processing
+- IGES (`.iges`/`.igs`) is **not** supported — OrcaSlicer's STEP reader (`STEPCAFControl_Reader`) does not read IGES
+
+#### Universal desk cable holder
+
+The [Universal Desk Cable Holder](https://www.printables.com/model/1728813-universal-desk-cable-holder)
+is distributed as separate **BASE** and **SCREW** parts. Download the STL files
+from Printables to your computer, then select the part(s) in OrcaWeb; the app
+does not fetch a model directly from a URL. The model instructions state that
+support is needed only for BASE, which is printed face down.
+
+### Settings tab
+
+Configure the print before slicing.
+
+#### Printer
+
+Choose a preset printer or select **Generic 0.4** / **Generic 0.6** for a standard setup. The selected printer determines the bed size shown in the 3D viewer and used for model centring during slicing.
+
+| Preset | Bed size |
+|--------|----------|
+| Generic 0.4 / 0.6 | 256 × 256 mm |
+| Bambu Lab P1S | 256 × 256 mm |
+| Bambu Lab X1C | 256 × 256 mm |
+| Creality Ender 3 | 220 × 220 mm |
+| Prusa MK4 | 250 × 210 mm |
+| Voron 2.4 | 300 × 300 mm |
+
+You can also load a 3MF file from OrcaSlicer to pull in the exact bed dimensions from your slicer project.
+
+#### Filament
+
+Select the material type; nozzle and bed temperatures update automatically. Use
+**+ Add filament slot** for a multi-material print, then assign each model to a
+slot on the Slice tab. When a profile set supplies filament JSON files, the
+imported slot labels and per-slot engine vectors are retained together.
+
+| Material | Nozzle | Bed |
+|----------|--------|-----|
+| PLA | 220°C | 60°C |
+| PETG | 240°C | 80°C |
+| ABS | 255°C | 100°C |
+| TPU | 230°C | 50°C |
+
+#### Quality preset
+
+| Preset | Layer height | Use case |
+|--------|-------------|----------|
+| Draft | 0.3 mm | Fast prototypes |
+| Standard | 0.2 mm | Everyday prints |
+| Fine | 0.1 mm | Detail parts |
+
+#### Infill
+
+Adjust density (0–100%) and pattern. Available patterns: grid, gyroid, honeycomb, triangles, cubic, lightning, rectilinear.
+
+#### Supports
+
+Enable auto supports. Supported types: `normal(auto)`, `normal(manual)`, `tree(auto)`, `tree(manual)`.
+
+#### Advanced settings
+
+Click **Show advanced settings** for:
+
+- Speed overrides (default, outer wall, first layer, travel)
+- Seam position
+- Fuzzy skin (surface roughness)
+- Ironing (top surface)
+
+##### Fuzzy skin
+
+Adds random noise to the outer perimeter to give models a rough, organic texture instead of smooth walls.
+
+| Option | Effect |
+|--------|--------|
+| **None** | Standard smooth walls (default) |
+| **External** | Applies noise to outer walls only |
+| **All** | Applies noise to all walls (outer + inner) |
+
+When fuzzy skin is enabled two extra fields appear:
+
+- **Thickness** (0.05–2 mm, default 0.3 mm) — amplitude of the noise; larger values = rougher texture
+- **Point dist** (0.1–5 mm, default 0.8 mm) — spacing between noise sample points along the wall; smaller values = denser, finer pattern
+
+The noise is generated by `libnoise` compiled into the WASM engine (Perlin, Billow, RidgedMulti, and Voronoi waveforms are all active).
+
+#### Settings you changed yourself
+
+Any field you edit by hand is marked with an **amber outline** and a small **reset** button, and a line at the top of the panel counts how many there are.
+
+Those edits are the highest-priority layer: they **stay put when you switch printer, filament or quality preset, and when you load another 3MF or profile**. Only the fields you never touched follow the newly selected profile. To go back to a profile's own value, use the field's **reset** button, or **Reset all** at the top of the panel.
+
+The full order — preset, then imported file, then your edits — is described under [Settings precedence](profiles.md#settings-precedence).
+
+#### Importing an OrcaSlicer profile set
+
+Click **Import profiles (.json)** and select the files that make up the desktop
+selection. For the two-nozzle Voron path, select one machine file, one process
+file, and both filament files in one operation. The app shows a `profile set`
+notice and applies the files on top of the current preset — but below anything
+you edited by hand. The selection is rejected without changing the active
+configuration if it contains duplicate machine/process/print categories or an
+invalid JSON file.
+
+The app does not resolve private `inherits` parents over the network. Leaf
+values and multi-slot vectors are preserved; omitted inherited values remain
+from the selected built-in preset or engine defaults. Verify the imported
+dimensions, temperatures, start G-code, and slot mapping before the first
+production print.
+
+Changing the printer removes a complete imported machine/profile-set/3MF
+context before the new printer is applied; this keeps the printer selector and
+the machine/nozzle vectors in agreement. Standalone filament or process
+imports remain active when the printer changes.
+
+The imported set describes a fixed list of materials. Adding/removing a slot or
+choosing another material clears that set before applying the new list, so its
+custom per-filament values cannot leak onto a different material. Re-import the
+four files if you need the original set again.
+
+Alternatively, load a **3MF file** — profiles embedded in the archive are extracted automatically (see [Model tab](#model-tab) above).
+
+→ [Profile format details](profiles.md)
+
+Settings (printer, filament, quality preset, and any overrides) are saved in
+your browser's local storage and restored on the next visit.
+
+### Slice tab
+
+Each uploaded file appears as a queue item. Click **Slice** (or **Slice All**)
+to slice every ready file one after another:
+
+1. The STL is passed to the Web Worker running OrcaSlicer WASM
+2. Slicing takes ~50–500 ms for small models, up to minutes for complex ones
+3. Each finished card shows the print time, filament use, and layer count,
+   plus **Download** and an eye icon that expands a side-by-side preview:
+   - **Model** — your original STL on the print bed
+   - **G-code** — rendered toolpaths with a layer slider
+
+While a slice is running a **Cancel** button appears — cancelling restarts
+the slicer engine, so the next slice reloads it (from cache, a few seconds).
+
+With two or more ready files, **One plate** arranges them all on a single bed
+and produces one combined G-code file, and **Download All (.zip)** bundles
+every finished G-code into a single ZIP archive.
+
+The 3D preview also exposes **Auto orient objects on current plate** and
+**Arrange objects on current plate**. Both operations run in the OrcaSlicer
+engine and keep the returned per-object transforms in the queue, so the next
+slice reuses the orientation and any explicit placement; arrangement-owned
+positions remain available for the normal multi-object arrangement pass.
+
+!!! note "Changing settings after slicing"
+    If you change any setting after a file was sliced, its result is marked
+    **"Sliced with previous settings"** and the Slice button turns into
+    **Re-slice** — the previous G-code stays downloadable until you re-slice.
+
+OrcaWeb's scope ends at the downloaded G-code file. Uploading or sending it to
+the Voron/Moonraker workflow is a separate step outside this application.
+
+#### G-code viewer
+
+- **Feature-type colours** — when the G-code contains OrcaSlicer `;TYPE:` (generic flavor) or `; FEATURE:` (Bambu flavor) comments each feature type (outer wall, inner wall, infill, support, bridge, etc.) is rendered in a distinct colour. A legend overlay in the top-right corner shows the colour key.
+- **Layer detection** — layers follow the engine's `;LAYER_CHANGE` / `; CHANGE_LAYER` markers, so spiral/vase-mode prints and Z-hop moves are displayed correctly; G-code without markers falls back to grouping by Z height.
+- **Arc moves** — `G2`/`G3` arcs (arc-fitting profiles) are tessellated and rendered like ordinary moves.
+- **Height gradient** — plain G-code without feature comments is coloured blue (bottom) → orange (top).
+- **Thick extrusion lines** — rendered with `LineSegments2` + `LineMaterial` (1.6 px screen-space width) for a solid, 3D-looking result. WebGL's `linewidth` is ignored above 1 px on most drivers.
+- **Travel moves** — non-extruding rapid moves are shown as dim grey lines when the **Travels** toggle in the control bar is on (off by default).
+- **Layer cursor** — a semi-transparent plane marks the height of the currently selected layer.
+- Use the **Layer** slider to scroll through from bottom to top.
+- The layer counter shows current layer / total layers and the Z height.
+
+#### G-code statistics
+
+Each finished queue card shows key metrics parsed from the G-code output:
+
+| Stat | Source |
+|------|--------|
+| Print time | `; total estimated time` / `; model printing time` (Bambu flavor) or `; estimated printing time =` comment |
+| Filament | `; filament used [g]` comment, falling back to `; filament used [mm]` |
+| Layers | `; total layer number` comment |
+
+Stats are searched in the head and tail of the G-code file, as OrcaSlicer writes them in both locations.
+
+#### Downloading G-code
+
+Click **Download** on a queue card to save that file's output as
+`<filename>.gcode`. With several finished files, **Download All (.zip)**
+saves them together as one ZIP archive.
+
+## Performance notes
+
+- WASM loads once per browser session (~10–30 s on first visit depending on connection, then cached)
+- Slicing a small model (10 mm cube): ~150 ms
+- Slicing a complex model (500k triangles): ~2–5 s
+- Slicing runs single-threaded in your browser session unless you're on a cross-origin-isolated deployment (currently the Cloudflare mirror), where a multithreaded engine variant is used transparently for a speed-up on complex models — see the [ST vs MT benchmark](st-mt-benchmark.md). Either way, no action is required on your part; the app selects the right engine automatically.

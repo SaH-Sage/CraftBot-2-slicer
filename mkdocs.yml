@@ -1,0 +1,94 @@
+site_name: OrcaWeb
+docs_dir: mkdocs-docs
+site_description: OrcaSlicer running in the browser via WebAssembly
+site_url: https://hiosdra.github.io/OrcaWeb/docs/
+repo_url: https://github.com/Hiosdra/OrcaWeb
+repo_name: Hiosdra/OrcaWeb
+edit_uri: edit/master/mkdocs-docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.code.annotate
+
+extra_css:
+  - stylesheets/extra.css
+
+nav:
+  - Home: index.md
+  - Users:
+    - Getting Started: getting-started.md
+    - User Guide: user-guide.md
+    - Profiles: profiles.md
+  - Developers:
+    - Architecture: architecture.md
+    - Integration Guide: integration.md
+    - WASM Engine Migration: wasm-engine-migration.md
+    - API Reference: api-reference.md
+    - Building WASM: wasm-build.md
+  - Project:
+    - Status: status.md
+    - Architecture Decisions:
+      - Overview: adr/index.md
+      - 'ADR-001: Client-Side WASM': adr/adr-001-client-side-wasm.md
+      - 'ADR-002: Technology Stack': adr/adr-002-tech-stack.md
+      - 'ADR-003: Web Worker + Singleton': adr/adr-003-web-worker.md
+      - 'ADR-004: Self-Built WASM': adr/adr-004-self-built-wasm.md
+      - 'ADR-005: No slicer.data': adr/adr-005-no-slicer-data.md
+      - 'ADR-006: Engine Patch Strategy': adr/adr-006-patch-strategy.md
+      - 'ADR-007: Sequential TBB Stubs': adr/adr-007-tbb-stubs.md
+      - 'ADR-008: Session-Scoped Engine State': adr/adr-008-session-handle.md
+      - 'ADR-009: WASM Build Smoke Test': adr/adr-009-wasm-smoke-test.md
+      - 'ADR-010: E2E UI Smoke Test': adr/adr-010-e2e-smoke-test.md
+      - 'ADR-011: Multithreaded Engine': adr/adr-011-multithreaded-engine.md
+      - 'ADR-012: Atomic Local Profile Sets': adr/adr-012-local-profile-sets.md
+  - Internals & Reports:
+    - 'Benchmark: ST vs MT Engine': st-mt-benchmark.md
+    - 'Benchmark: G-code Compression': gcode-compression-benchmark.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - attr_list
+  - def_list
+  - md_in_html
+
+plugins:
+  - search

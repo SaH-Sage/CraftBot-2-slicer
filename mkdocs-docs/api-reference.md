@@ -1,0 +1,678 @@
+# API Reference
+
+## WASM C API
+
+Exported by `slicer.wasm` via Emscripten. Called from `src/lib/wasm-loader.ts`.
+
+All functions use C linkage (`extern "C"`). The Emscripten JS glue (`slicer.js`) exposes them with a leading underscore, e.g. `_orc_init`.
+
+`orc_init`, `orc_slice`, `orc_slice_multi`, and `orc_prepare_plate` take a session handle as their
+first argument (see [ADR-008](adr/adr-008-session-handle.md)) — allocate one
+with `orc_session_create()` before calling any of them, and free it with
+`orc_session_destroy()` when done. `orc_obj_to_stl` / `orc_cad_to_stl` are pure
+format conversions with no config state, so they take no session.
+
+---
+
+### `orc_session_create` / `orc_session_destroy`
+
+```c
+void* orc_session_create();          // 0 (null) = allocation failed
+void  orc_session_destroy(void* session);
+```
+
+Allocate/free an opaque engine session — the config, initialisation flag, bed
+geometry, and last-error message that used to live in process-wide C++
+statics now live behind this handle instead, so more than one independent
+session can safely exist in the same WASM instance. `src/workers/slicer.worker.ts`
+creates exactly one session right after the module loads and reuses it for
+the worker's entire lifetime.
+
+---
+
+### `orc_init`
+
+```c
+int orc_init(void* session, const char* config_json, int json_len);
+```
+
+Initialise the slicer with a JSON configuration object. Must be called before
+`orc_slice`, `orc_slice_multi`, or `orc_prepare_plate`.
+
+**Parameters**
+
+- `session` — handle from `orc_session_create()`
+- `config_json` — pointer to UTF-8 JSON string on the WASM heap
+- `json_len` — byte length of the string
+
+**Returns**
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `-1` | Null/invalid session handle |
+| `-2` | JSON parse failure or any C++ exception during initialisation |
+
+**Behaviour**
+
+- Starts from OrcaSlicer's built-in defaults so all required fields are always present.
+- Unknown JSON keys are silently ignored.
+- The special keys `bed_size_x`, `bed_size_y`, and `bed_shape` are extracted for model centering and are **not** forwarded to the OrcaSlicer config engine.
+- The pseudo-keys `remove_mixed_temp_restriction` (bool), `adaptive_layer_height` (bool), and `adaptive_layer_height_quality` (0–1 float) are likewise read here rather than forwarded as engine options: the first toggles the mixed-nozzle-temperature guard before `validate()`, and the latter two drive per-object variable layer height computed at slice time (see `orc_slice`). Each accepts a JSON bool/number or its `"1"`/`"0"`/`"true"`/`"false"` string form.
+- On success the configuration persists for all subsequent `orc_slice` / `orc_slice_multi` calls on the same session until `orc_init` is called again.
+
+---
+
+### `orc_slice`
+
+```c
+int orc_slice(
+    void*       session,
+    const void* stl_data, int stl_len,
+    char**      out_gcode, int* out_len,
+    const float* transforms
+);
+```
+
+Slice an STL file and write G-code to a newly allocated buffer.
+
+**Parameters**
+
+- `session` — handle from `orc_session_create()`, already `orc_init`'d
+- `stl_data` — pointer to binary or ASCII STL bytes on the WASM heap
+- `stl_len` — byte length of the STL
+- `out_gcode` — on success, written with the address of a malloc'd, null-terminated G-code string
+- `out_len` — on success, written with the byte length of the G-code (excluding null terminator)
+- `transforms` — nullable pointer to one 11-float transform record; pass `0` for
+  legacy placement. The record is `[scale xyz, rotation xyz in radians, mirror
+  xyz, offset xy]`; the offset is relative to bed centre and two NaNs delegate
+  placement to the engine's single-object placement path.
+
+**Returns**
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `-1` | Invalid arguments, null session, or `orc_init` was not called |
+| `-3` | Could not write STL to MEMFS |
+| `-4` | STL load failed (invalid or corrupt geometry) |
+| `-5` | Model contains no objects |
+| `-6` | Print validation failed |
+| `-7` | Slicing error |
+| `-8` | G-code export failed |
+| `-9` | Unexpected C++ exception |
+
+**Memory:** caller must free `*out_gcode` with `orc_free()` after reading it.
+
+---
+
+### `orc_slice_multi`
+
+```c
+int orc_slice_multi(
+    void*       session,
+    const void* all_stl, int all_stl_len,
+    const int*  offsets,  int n_files,
+    const int*  extruder_ids,
+    char**      out_gcode, int* out_len,
+    const float* transforms
+);
+```
+
+Arrange multiple STL files on a single plate and slice them to one G-code file.
+Requires `orc_init` to have been called first on the same session.
+
+**Parameters**
+
+- `session` — handle from `orc_session_create()`, already `orc_init`'d
+- `all_stl` — concatenation of all STL file bytes on the WASM heap
+- `all_stl_len` — total byte length of the concatenated buffer
+- `offsets` — `int32` array of length `n_files * 2`: `[start0, len0, start1, len1, …]`
+- `n_files` — number of STL files
+- `extruder_ids` — nullable `int32` array of length `n_files`: a 1-based
+  `"extruder"` config override per object (`0` = inherit the config's
+  default). Forwarded to OrcaSlicer's per-object `extruder` config key
+  (`coInt`, `min 0` = inherit; `normalize_fdm()` resolves it to the
+  per-region `*_filament_id` fields). Names a *filament* slot, not a nozzle:
+  whether two slots share one nozzle (AMS-style) or drive genuine T0/T1 tool
+  changes on a real multi-nozzle machine is decided by `filament_map` in the
+  config, which the frontend builds in `withFilamentSlots()`
+  (`src/lib/profiles.ts`). Both cases are supported as of
+  [#160](https://github.com/Hiosdra/OrcaWeb/pull/160). Pass `0`/null to leave
+  every object on the default extruder (unchanged behaviour from before this
+  parameter existed).
+- `out_gcode` — on success, written with the address of the output G-code buffer
+- `out_len` — on success, written with the byte length of the output buffer
+- `transforms` — nullable pointer to `n_files * 11` floats. Each record is
+  `[scale xyz, rotation xyz in radians, mirror xyz, offset xy]`; finite offsets
+  are relative to bed centre and pinned during arrangement, while two NaNs let
+  `arrange_objects()` choose the position. Pass `0` to preserve the legacy
+  placement path.
+
+**Returns** — same error code convention as `orc_slice`.
+
+**Arrangement** uses OrcaSlicer's `arrange_objects()` (libnest2d + NLopt, single-threaded) with a 2 mm minimum gap. Objects that cannot fit on the bed are placed at bed centre rather than triggering an error. For circular beds (`bed_shape: "circle"`), the arrangement boundary is the largest inscribed square (half-side = radius / √2).
+
+**Memory:** caller must free `*out_gcode` with `orc_free()` after reading it.
+
+---
+
+### `orc_prepare_plate`
+
+```c
+int orc_prepare_plate(
+    void*       session,
+    const void* all_stl, int all_stl_len,
+    const int*  offsets, int n_files,
+    const float* transforms, int operation,
+    char**      out_transforms_json, int* out_len
+);
+```
+
+Run a current-plate operation without slicing. Use `operation = 1` for
+auto-orient or `operation = 2` for arrange. The result is a JSON array with
+one canonical transform per input STL, ready to pass back to `_orc_slice` or
+`_orc_slice_multi` on the next slice. Arrange preserves finite input offsets
+as pinned objects and arranges NaN-offset objects around them.
+
+The transform record is 11 floats: scale XYZ, rotation XYZ in radians, mirror
+XYZ (`1` or `-1`), and X/Y offset in millimetres relative to bed centre. Use
+NaN for both offset values when placement belongs to arrange.
+
+**Memory:** caller must free `*out_transforms_json` with `orc_free()` after reading it.
+
+**Returns:** the same `-1` to `-9` error convention as `orc_slice`.
+
+---
+
+### `orc_obj_to_stl`
+
+```c
+int orc_obj_to_stl(
+    const char* obj_data, int obj_len,
+    char**      out_stl,  int* out_len
+);
+```
+
+Convert an OBJ file to binary STL using OrcaSlicer's native parser. Does **not** require `orc_init`.
+
+**Parameters**
+
+- `obj_data` — pointer to raw OBJ file bytes on the WASM heap
+- `obj_len` — byte length of the OBJ data
+- `out_stl` — on success, written with the address of the output STL buffer
+- `out_len` — on success, written with the byte length of the output STL
+
+**Returns**
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `-1` | Invalid arguments (null pointer or zero length) |
+| `-3` | Could not write OBJ to MEMFS |
+| `-4` | OBJ load failed (invalid or unsupported format) |
+| `-5` | OBJ contains no printable geometry |
+| `-8` | Internal STL export failed |
+| `-9` | Unexpected C++ exception |
+
+**Supported OBJ features:** triangle and quad faces (quads auto-triangulated), multiple named objects (merged into one mesh), `v/vt/vn` vertex format variants.  
+**Ignored:** MTL material files, vertex colours, NURBS curves/surfaces.
+
+**Memory:** caller must free `*out_stl` with `orc_free()` after reading it.
+
+---
+
+### `orc_cad_to_stl`
+
+```c
+int orc_cad_to_stl(
+    const char* cad_data, int cad_len,
+    char**      out_stl,  int* out_len
+);
+```
+
+Convert a STEP file to binary STL using the OCCT 7.8.1 reader compiled into `slicer.wasm`. Does **not** require `orc_init`.
+
+**Parameters**
+
+- `cad_data` — pointer to raw STEP file bytes on the WASM heap
+- `cad_len` — byte length of the STEP data
+- `out_stl` — on success, written with the address of the output STL buffer
+- `out_len` — on success, written with the byte length of the output STL
+
+**Returns**
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `-1` | Invalid arguments (null pointer or zero length) |
+| `-3` | Could not write STEP data to MEMFS |
+| `-4` | STEP load failed (bad file or unsupported STEP feature) |
+| `-5` | File contains no printable geometry |
+| `-8` | STL export failed |
+| `-9` | Unexpected C++ exception |
+
+**Notes**
+
+- Only STEP (`.step`, `.stp`) is accepted. IGES is not supported — `STEPCAFControl_Reader` does not read IGES.
+- Tessellation uses OrcaSlicer defaults: linear deflection `0.003 mm`, angular deflection `0.5°`.
+- All STEP shapes are merged into a single STL mesh.
+
+**Memory:** caller must free `*out_stl` with `orc_free()` after reading it.
+
+---
+
+### `orc_write_3mf`
+
+```c
+int orc_write_3mf(
+    void*       session,
+    const void* stl_data, int stl_len,
+    char**      out_3mf,  int* out_len
+);
+```
+
+Export a single mesh plus the session's current config as a `.3mf` archive (geometry + embedded process/filament/printer settings — no plate/G-code/thumbnail data). Requires a prior `orc_init` on the same session; the exported settings are whatever that call last applied.
+
+**Parameters**
+
+- `session` — handle from `orc_session_create`, already `orc_init`'d
+- `stl_data` / `stl_len` — pointer/length of the mesh to embed, as binary STL
+- `out_3mf` — on success, written with the address of the output `.3mf` buffer
+- `out_len` — on success, written with the byte length of the output
+
+**Returns**
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `-1` | Invalid/uninitialized session, or invalid arguments |
+| `-3` | Could not write STL to MEMFS |
+| `-4` | STL load failed |
+| `-5` | Empty model |
+| `-8` | 3MF export failed |
+| `-9` | Unexpected C++ exception |
+
+**Memory:** caller must free `*out_3mf` with `orc_free()` after reading it.
+
+---
+
+### `orc_read_3mf`
+
+```c
+int orc_read_3mf(
+    const void* mf_data,        int mf_len,
+    char**      out_stl,        int* out_stl_len,
+    char**      out_config_json, int* out_config_len
+);
+```
+
+Read a `.3mf` file's mesh and embedded OrcaSlicer config using OrcaSlicer's own reader (`load_bbs_3mf`), so multi-object assemblies and per-object/instance transforms are resolved exactly the way OrcaSlicer itself resolves them. A pure format conversion like `orc_obj_to_stl`/`orc_cad_to_stl` — no session/config state involved, so it takes none.
+
+**Parameters**
+
+- `mf_data` / `mf_len` — pointer/length of the raw `.3mf` archive bytes
+- `out_stl` — on success, written with the address of a binary STL buffer (all objects merged into one mesh, with each object's transform already applied)
+- `out_stl_len` — byte length of `*out_stl`
+- `out_config_json` — on success, written with the address of a null-terminated JSON string of every config key the file's `Metadata/*.config` had set (same shape `parseOrcaProfileJson()` already parses for imported profile JSON)
+- `out_config_len` — byte length of `*out_config_json`, excluding the trailing NUL
+
+**Returns**
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `-1` | Invalid arguments (null pointer or zero length) |
+| `-3` | Could not write `.3mf` bytes to MEMFS |
+| `-4` | 3MF load failed (bad archive / no recognizable model) |
+| `-5` | 3MF contains no printable geometry |
+| `-8` | STL export of the merged mesh failed |
+| `-9` | Unexpected C++ exception |
+
+**Memory:** caller must free both `*out_stl` and `*out_config_json` with `orc_free()`.
+
+---
+
+### `orc_free`
+
+```c
+void orc_free(void* ptr);
+```
+
+Free a buffer allocated by `orc_slice`, `orc_slice_multi`, `orc_obj_to_stl`, `orc_cad_to_stl`, `orc_write_3mf`, or `orc_read_3mf`. Do **not** use `_free` for these buffers — they are `malloc`'d by the C++ bridge.
+
+---
+
+### `orc_decode_exception`
+
+```c
+const char* orc_decode_exception(void* session);
+```
+
+Return the last error message stored by the C++ bridge as a null-terminated UTF-8 string. The pointer is valid only until the next `orc_*` call.
+
+Pass the **session** used for a failing `orc_init` / `orc_slice` / `orc_slice_multi` call. Pass `0` (null) after a failing `orc_obj_to_stl` / `orc_cad_to_stl` call — those take no session, and `0` falls back to a small dedicated error slot used only by those two conversion functions.
+
+**Usage pattern**
+
+```typescript
+const rc = module._orc_slice(session, stlPtr, stlLen, ptrPtr, lenPtr, 0)
+if (rc !== 0) {
+  const errPtr = module._orc_decode_exception(session)
+  const message = module.UTF8ToString(errPtr)
+  throw new Error(`orc_slice (${rc}): ${message}`)
+}
+```
+
+---
+
+## Memory management
+
+The WASM module uses an Emscripten-managed heap. JavaScript must allocate and free manually.
+
+```typescript
+// Allocate on the WASM heap
+const ptr = module._malloc(byteLength)
+
+// Write bytes
+module.HEAPU8.set(data, ptr)
+
+// Write an i32 at ptr
+module.setValue(ptr, value, 'i32')
+
+// Read an i32 from ptr
+const val = module.getValue(ptr, 'i32')
+
+// Read a null-terminated C string
+const str = module.UTF8ToString(ptr)
+
+// Read a C string of known byte length
+const str = module.UTF8ToString(ptr, byteLength)
+
+// Free memory you allocated with _malloc
+module._free(ptr)
+
+// Free memory returned by orc_slice / orc_obj_to_stl / orc_cad_to_stl
+module._orc_free(ptr)
+```
+
+!!! warning "orc_free vs _free"
+    Buffers **returned** by the C bridge (`orc_slice`, `orc_slice_multi`, `orc_obj_to_stl`, `orc_cad_to_stl`) must be freed with `_orc_free`.  
+    Buffers you allocated yourself with `_malloc` must be freed with `_free`.
+
+---
+
+## TypeScript interface
+
+```typescript
+interface OrcaModule {
+  // Emscripten heap utilities
+  _malloc(size: number): number
+  _free(ptr: number): void
+  setValue(ptr: number, value: number, type: 'i32' | 'i64' | 'float' | 'double'): void
+  getValue(ptr: number, type: 'i32' | 'i64' | 'float' | 'double'): number
+  UTF8ToString(ptr: number, length?: number): string
+  HEAPU8: Uint8Array
+
+  // OrcaSlicer bridge
+  _orc_session_create(): number                  // 0 = allocation failed
+  _orc_session_destroy(session: number): void
+  _orc_init(session: number, configPtr: number, len: number): number
+  _orc_slice(
+    session: number,
+    stlPtr: number, stlLen: number,
+    outPtrPtr: number, outLenPtr: number,
+    transformsPtr: number, // nullable (0) 11-float transform table
+  ): number
+  _orc_slice_multi(
+    session: number,
+    dataPtr: number, dataLen: number,
+    offsetsPtr: number, nFiles: number,
+    extruderIdsPtr: number,                      // nullable (0) i32 array pointer
+    outPtrPtr: number, outLenPtr: number,
+    transformsPtr: number,                       // nullable (0) 11-float table
+  ): number
+  _orc_prepare_plate(
+    session: number,
+    dataPtr: number, dataLen: number,
+    offsetsPtr: number, nFiles: number,
+    transformsPtr: number, operation: 1 | 2,
+    outPtrPtr: number, outLenPtr: number,
+  ): number
+  _orc_obj_to_stl(
+    objPtr: number, objLen: number,
+    outPtrPtr: number, outLenPtr: number,
+  ): number
+  _orc_cad_to_stl(
+    cadPtr: number, cadLen: number,
+    outPtrPtr: number, outLenPtr: number,
+  ): number
+  _orc_free(ptr: number): void
+  _orc_decode_exception(session: number): number  // returns ptr to C string; 0 for conversion errors
+}
+```
+
+---
+
+## Worker message protocol
+
+Communication between the main thread and `slicer.worker.ts`.
+
+### Main → Worker
+
+```typescript
+// Tell the worker where to fetch the engine
+{ type: 'LOAD_WASM'; url: string }   // url points to slicer.js
+
+// Slice a single STL file
+{
+  type: 'SLICE'
+  stl: ArrayBuffer      // transferred (zero-copy)
+  config: OrcaConfig
+}
+
+// Arrange N STL files on one plate and slice together
+{
+  type: 'SLICE_MULTI'
+  stls: ArrayBuffer[]   // all transferred (zero-copy)
+  config: OrcaConfig
+  extruderIds?: number[]  // optional, parallel to stls — see orc_slice_multi
+}
+
+// Convert an OBJ file to binary STL
+{
+  type: 'OBJ_TO_STL'
+  obj: ArrayBuffer      // transferred (zero-copy)
+  filename: string      // echoed back in the response for tracking
+}
+
+// Convert a STEP file to binary STL
+{
+  type: 'CAD_TO_STL'
+  cad: ArrayBuffer      // transferred (zero-copy)
+  filename: string      // echoed back in the response for tracking
+}
+
+// Export a mesh + config as a .3mf (see orc_write_3mf)
+{
+  type: 'WRITE_3MF'
+  stl: ArrayBuffer      // transferred (zero-copy)
+  config: OrcaConfig
+  requestId: string     // echoed back in the response for tracking
+}
+
+// Read a .3mf's mesh + embedded config (see orc_read_3mf)
+{
+  type: 'READ_3MF'
+  mf: ArrayBuffer        // transferred (zero-copy)
+  requestId: string      // echoed back in the response for tracking
+}
+```
+
+### Worker → Main
+
+```typescript
+// Worker script evaluated, ready to receive messages
+{ type: 'WORKER_READY' }
+
+// WASM module fully loaded and ready
+{ type: 'WASM_LOADED' }
+
+// WASM failed to load
+{ type: 'WASM_ERROR'; message: string }
+
+// Single-file slicing finished
+{ type: 'SLICE_COMPLETE'; gcode: string }
+
+// Single-file slicing failed
+{ type: 'SLICE_ERROR'; code: number; message: string }
+
+// Plate slicing finished
+{ type: 'SLICE_MULTI_COMPLETE'; gcode: string }
+
+// Plate slicing failed
+{ type: 'SLICE_MULTI_ERROR'; code: number; message: string }
+
+// OBJ → STL conversion finished
+{ type: 'OBJ_STL_COMPLETE'; stl: ArrayBuffer; filename: string }
+
+// OBJ → STL conversion failed
+{ type: 'OBJ_STL_ERROR'; message: string; filename: string }
+
+// STEP → STL conversion finished
+{ type: 'CAD_STL_COMPLETE'; stl: ArrayBuffer; filename: string }
+
+// STEP → STL conversion failed
+{ type: 'CAD_STL_ERROR'; message: string; filename: string }
+
+// .3mf export finished
+{ type: 'WRITE_3MF_COMPLETE'; data: ArrayBuffer; requestId: string }
+
+// .3mf export failed
+{ type: 'WRITE_3MF_ERROR'; message: string; requestId: string }
+
+// .3mf read finished
+{ type: 'READ_3MF_COMPLETE'; stl: ArrayBuffer; configJson: string; requestId: string }
+
+// .3mf read failed
+{ type: 'READ_3MF_ERROR'; message: string; requestId: string }
+```
+
+**Ordering notes:**
+
+- `LOAD_WASM` must be sent before any other message type.
+- Slice and conversion requests sent before `WASM_LOADED` are queued inside the worker and dispatched automatically once the engine is ready.
+- `SLICE` requests are last-wins when queued (only one can be pending). `OBJ_TO_STL`, `CAD_TO_STL`, `WRITE_3MF`, and `READ_3MF` requests are queued independently (FIFO).
+
+---
+
+## Config JSON schema
+
+Passed as the body of `orc_init`. All fields are optional — omitted fields use OrcaSlicer built-in defaults.
+
+```typescript
+interface OrcaConfig {
+  // Bed geometry — used for model centering and auto-arrangement
+  bed_size_x?: number              // print bed width  (mm); default 256
+  bed_size_y?: number              // print bed depth  (mm); default 256
+  bed_shape?: 'rectangle'          // cartesian/CoreXY (default)
+            | 'circle'             // delta / round bed
+
+  // Machine
+  printer_model?: string           // e.g. "BambuLab X1C"
+  nozzle_diameter?: number         // mm, e.g. 0.4
+  printable_height?: number        // maximum model height in mm
+
+  // Filament
+  filament_type?: string           // 'PLA' | 'PETG' | 'ABS' | 'TPU' | ...
+  nozzle_temperature?: number      // °C
+  bed_temperature?: number         // °C
+  fan_min_speed?: number           // 0–100 %
+
+  // Quality
+  layer_height?: number            // mm
+  initial_layer_print_height?: number // mm; FFF first-layer height
+  top_shell_layers?: number
+  bottom_shell_layers?: number
+  wall_loops?: number
+  adaptive_layer_height?: boolean            // variable layer height (pseudo-key)
+  adaptive_layer_height_quality?: number     // 0–1, default 0.5; lower = finer
+
+  // Infill
+  sparse_infill_density?: number   // 0–100
+  sparse_infill_pattern?: InfillPattern
+
+  // Speed  (mm/s)
+  default_speed?: number
+  outer_wall_speed?: number
+  initial_layer_speed?: number
+  travel_speed?: number
+
+  // Supports
+  enable_support?: boolean
+  support_type?: SupportType
+
+  // Adhesion
+  brim_width?: number              // mm
+
+  // Surface quality
+  seam_position?: SeamPosition
+  fuzzy_skin?: FuzzySkin
+  fuzzy_skin_thickness?: number    // mm; 0.05–2 (default 0.3)
+  fuzzy_skin_point_dist?: number   // mm; 0.1–5 (default 0.8)
+  enable_ironing?: boolean
+
+  // Escape hatch — forward any OrcaSlicer key verbatim
+  // Values must be strings (OrcaSlicer's internal serialisation format)
+  _passthrough?: Record<string, string>
+}
+
+type InfillPattern =
+  | 'grid' | 'gyroid' | 'honeycomb' | 'triangles'
+  | 'cubic' | 'lightning' | 'rectilinear'
+
+type SupportType =
+  | 'normal(auto)' | 'normal(manual)'
+  | 'tree(auto)'   | 'tree(manual)'
+
+type SeamPosition = 'aligned' | 'nearest' | 'back' | 'random'
+
+type FuzzySkin = 'none' | 'external' | 'all'
+```
+
+### `_passthrough` field
+
+Any OrcaSlicer config key not covered by the typed fields above can be forwarded verbatim. Values must be strings encoded as OrcaSlicer stores them (numbers as `"0.2"`, booleans as `"1"` / `"0"`):
+
+```json
+{
+  "layer_height": 0.2,
+  "_passthrough": {
+    "max_layer_height": "0.28",
+    "min_layer_height": "0.07",
+    "enable_overhang_speed": "1"
+  }
+}
+```
+
+Unknown or incompatible keys in `_passthrough` are silently ignored by the C++ bridge.
+
+---
+
+## G-code statistics
+
+`parseGcodeStats` (internal utility, called by the UI's `SlicePanel`) returns:
+
+```typescript
+interface GcodeStats {
+  bytes: number            // UTF-8 byte size of the G-code file
+  lines: number            // total line count
+  layers?: number          // from "; total layers count = N"
+  printTime?: string       // from "; estimated printing time = ..."
+  filamentMm?: number      // from "; total filament used [mm] = N"
+  filamentCm3?: number     // from "; total filament used [cm3] = N"
+  filamentG?: number       // from "; total filament weight [g] = N"
+}
+```
+
+Both the first 100 kB (up to 300 lines) and the last 30 kB (up to 200 lines) of the G-code string are scanned — OrcaSlicer may write summary comments at either the beginning or the end depending on the post-processing path. `layers` falls back to counting `;LAYER_CHANGE` markers in the full file when the `; total layers count` comment is absent.

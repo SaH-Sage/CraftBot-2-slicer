@@ -12,6 +12,8 @@ import { type ConfigField, mergeConfigLayers, resolveConfig, revertField } from 
 import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
 import { sameObjectTransform } from './lib/model-transforms'
+import { placeOnFace } from './lib/plate-tools'
+import { TransformPanel } from './components/TransformPanel'
 import type { ImportedProfileType } from './lib/profiles'
 import {
   buildConfig,
@@ -468,11 +470,46 @@ export default function App() {
     plateAction,
     plateActionError,
     autoOrientPlate,
+    applyTransforms,
     arrangePlate,
   } = useSliceQueue(config, handleSettingsImported)
 
   const bedX = config.bed_size_x ?? DISPLAY_DEFAULTS.bed_size_x
   const bedY = config.bed_size_y ?? DISPLAY_DEFAULTS.bed_size_y
+  const bedZ = config.printable_height ?? 200
+
+  // Manual plate tools: which model is waiting for a face click, and the
+  // transformed size of each model as the viewer measured it.
+  const [pickTarget, setPickTarget] = useState<string | null>(null)
+  const [modelSizes, setModelSizes] = useState<Record<string, [number, number, number]>>({})
+  const handlePickFace = useCallback(
+    (id: string, normal: [number, number, number]) => {
+      if (pickTarget !== null && id !== pickTarget) return
+      const item = queue.find((q) => q.id === id)
+      if (!item) return
+      applyTransforms([{ id, transform: placeOnFace(item.transform, normal) }])
+      setPickTarget(null)
+    },
+    [pickTarget, queue, applyTransforms],
+  )
+  const transformItems = useMemo(
+    () =>
+      queue
+        .filter((item) => item.stlFile)
+        .map((item) => ({ id: item.id, name: item.sourceFile.name, transform: item.transform, size: modelSizes[item.id] })),
+    [queue, modelSizes],
+  )
+  const transformPanel = (
+    <TransformPanel
+      items={transformItems}
+      bed={{ x: bedX, y: bedY, z: bedZ }}
+      pickTarget={pickTarget}
+      onPickTarget={setPickTarget}
+      onApply={applyTransforms}
+      onAddFile={(file) => addFiles([file])}
+      disabled={plateAction !== null}
+    />
+  )
   const bedShape = config.bed_shape ?? DISPLAY_DEFAULTS.bed_shape
 
   // Labels for the queue's per-object filament picker, one per real slot.
@@ -732,6 +769,9 @@ export default function App() {
                       bedX={bedX}
                       bedY={bedY}
                       bedShape={bedShape}
+                      pickMode={pickTarget !== null}
+                      onPickFace={handlePickFace}
+                      onBounds={setModelSizes}
                     />
                   </ViewerErrorBoundary>
                 </div>
@@ -744,6 +784,7 @@ export default function App() {
                   onArrange={arrangePlate}
                   onCancel={cancel}
                 />
+                {transformPanel}
               </div>
             )}
 
@@ -774,6 +815,9 @@ export default function App() {
                       bedX={bedX}
                       bedY={bedY}
                       bedShape={bedShape}
+                      pickMode={pickTarget !== null}
+                      onPickFace={handlePickFace}
+                      onBounds={setModelSizes}
                     />
                   </ViewerErrorBoundary>
                 </div>
@@ -786,6 +830,7 @@ export default function App() {
                   onArrange={arrangePlate}
                   onCancel={cancel}
                 />
+                {transformPanel}
               </div>
             )}
             <div className="bg-white rounded-2xl border border-slate-200 p-5 overflow-y-auto">

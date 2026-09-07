@@ -21,6 +21,16 @@ materialprofilene (PLA, PETG, TPU) er Craftbot sine egne OrcaSlicer-profiler, he
 Jobben laster ned skjæremotoren (ca. 38 MB) fra OrcaWeb sine utgivelser og bygger siden. Ingenting
 kompileres. Hver `git push` til `master` publiserer på nytt.
 
+## Plassering av modellen (plate tools)
+
+Under 3D-visningen har hver modell sine egne verktøy: roter ±90° om X/Y/Z eller en valgfri vinkel,
+**Place on face** (trykk knappen og klikk på flaten i 3D-visningen som skal ligge mot plata),
+skalering i prosent, **Fit to bed**, speiling og nullstilling. Auto-orient og Arrange finnes fortsatt.
+Nederst kan du lage en kube eller sylinder i valgfri størrelse til testutskrifter.
+
+Under *Supports & Adhesion* i innstillingene ligger også terskelvinkel for overheng, antall
+grensesjiktlag og «support on build plate only».
+
 ## Første utskrift – sjekkliste
 
 - Skriv ut en liten kube (20 mm) med *0,20 mm – Standard* og PLA før elevene slipper til.

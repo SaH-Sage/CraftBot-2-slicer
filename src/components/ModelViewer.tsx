@@ -22,6 +22,12 @@ interface Props {
   bedY?: number
   /** Bed shape — 'circle' for delta/round printers, default 'rectangle' */
   bedShape?: 'rectangle' | 'circle'
+  /** When true, a click on a model face calls onPickFace instead of orbiting. */
+  pickMode?: boolean
+  /** Picked face: model id and the face's outward normal in world space. */
+  onPickFace?: (id: string, normal: [number, number, number]) => void
+  /** Transformed size (mm) of every rendered model, keyed by model id. */
+  onBounds?: (sizes: Record<string, [number, number, number]>) => void
 }
 
 function buildBed(scene: THREE.Scene, bedX: number, bedY: number, bedShape: 'rectangle' | 'circle'): THREE.Object3D[] {
@@ -104,8 +110,11 @@ function applyTransform(mesh: THREE.Mesh, transform: ObjectTransform | undefined
   mesh.rotation.set(transform.rotation[0], transform.rotation[1], transform.rotation[2])
 }
 
-export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 'rectangle' }: Props) {
+export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 'rectangle', pickMode, onPickFace, onBounds }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
+  // Read through a ref so toggling pick mode does not rebuild the scene.
+  const pickRef = useRef({ pickMode, onPickFace, onBounds })
+  pickRef.current = { pickMode, onPickFace, onBounds }
   // Blocking: nothing could be drawn, so the overlay covering the canvas is
   // the whole content. Distinct from `notice` below, which annotates a
   // preview that did render and so must not hide it.
@@ -157,6 +166,29 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
     controls.minDistance = 10
     controls.maxDistance = 5000
     controls.target.set(0, 0, 0)
+
+    // Face picking (place-on-face). A click, not a drag, so orbiting still works.
+    const raycaster = new THREE.Raycaster()
+    let downAt: { x: number; y: number } | null = null
+    const onPointerDown = (e: PointerEvent) => {
+      downAt = { x: e.clientX, y: e.clientY }
+    }
+    const onPointerUp = (e: PointerEvent) => {
+      const start = downAt
+      downAt = null
+      if (!start || !pickRef.current.pickMode || !pickRef.current.onPickFace) return
+      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 4) return
+      const rect = renderer.domElement.getBoundingClientRect()
+      const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1)
+      raycaster.setFromCamera(ndc, camera)
+      const hit = raycaster.intersectObjects(meshes, false)[0]
+      if (!hit || !hit.face) return
+      const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
+      const id = (hit.object as THREE.Mesh).userData.modelId as string | undefined
+      if (id) pickRef.current.onPickFace(id, [normal.x, normal.y, normal.z])
+    }
+    renderer.domElement.addEventListener('pointerdown', onPointerDown)
+    renderer.domElement.addEventListener('pointerup', onPointerUp)
 
     const loader = new STLLoader()
     const meshes: THREE.Mesh[] = []
@@ -216,6 +248,7 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
         geometry.translate(-center.x, -center.y, -box.min.z)
         const mesh = new THREE.Mesh(geometry, material)
         mesh.castShadow = true
+        mesh.userData.modelId = model.id
         applyTransform(mesh, model.transform)
         mesh.updateMatrixWorld(true)
         const size = new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3())
@@ -254,6 +287,12 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
         meshes.push(mesh)
         sceneBounds.union(new THREE.Box3().setFromObject(mesh))
       })
+      const sizes: Record<string, [number, number, number]> = {}
+      for (const { mesh, model, size } of transformed) {
+        void mesh
+        sizes[model.id] = [size.x, size.y, size.z]
+      }
+      pickRef.current.onBounds?.(sizes)
 
       // Fit camera to the bed and all transformed models — Z-up: position
       // camera above and to the side.
@@ -291,6 +330,8 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
 
     return () => {
       cancelled = true
+      renderer.domElement.removeEventListener('pointerdown', onPointerDown)
+      renderer.domElement.removeEventListener('pointerup', onPointerUp)
       cancelAnimationFrame(animId)
       resizeObs.disconnect()
       controls.dispose()

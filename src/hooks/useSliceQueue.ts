@@ -418,6 +418,8 @@ export interface SliceQueue {
   plateActionError: string | null
   /** Orient all actionable objects on the current plate. */
   autoOrientPlate: () => void
+  /** Manual plate tools: replace the transform of the given queue items. */
+  applyTransforms: (updates: { id: string; transform: ObjectTransform }[]) => void
   /** Arrange all actionable objects on the current plate. */
   arrangePlate: () => void
   /** Arrange all ready items on one plate and slice them together. */
@@ -1026,6 +1028,9 @@ export function useSliceQueue(
   )
 
   const autoOrientPlate = useCallback(() => runPlateAction('auto-orient'), [runPlateAction])
+  const applyTransforms = useCallback((updates: { id: string; transform: ObjectTransform }[]) => {
+    dispatch({ type: 'APPLY_TRANSFORMS', updates })
+  }, [])
   const arrangePlate = useCallback(() => runPlateAction('arrange'), [runPlateAction])
 
   // Exports one queue item's current STL + config snapshot as a .3mf.
@@ -1114,6 +1119,7 @@ export function useSliceQueue(
     plateAction,
     plateActionError,
     autoOrientPlate,
+    applyTransforms,
     arrangePlate,
     slicePlate,
     cancel,

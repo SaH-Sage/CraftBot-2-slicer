@@ -939,14 +939,47 @@ export function SettingsPanel({
             onChange={(v) => onChange({ enable_support: v })}
           />
           {config.enable_support && (
-            <SelectField
-              label="Support type"
-              field="support_type"
-              value={config.support_type ?? DISPLAY_DEFAULTS.support_type}
-              options={['normal(auto)', 'normal(manual)', 'tree(auto)', 'tree(manual)'] as SupportType[]}
-              onChange={(v) => onChange({ support_type: v as SupportType })}
-              className="mt-3"
-            />
+            <>
+              <SelectField
+                label="Support type"
+                field="support_type"
+                value={config.support_type ?? DISPLAY_DEFAULTS.support_type}
+                options={['normal(auto)', 'tree(auto)'] as SupportType[]}
+                onChange={(v) => onChange({ support_type: v as SupportType })}
+                className="mt-3"
+              />
+              {/* Support controls that live outside the typed config: written straight to the
+                  engine through _passthrough, with Craftbot's profile values as defaults. */}
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <NumberField
+                  label="Overhang threshold"
+                  unit="°"
+                  value={passNumber(config, 'support_threshold_angle', 30)}
+                  min={0}
+                  max={90}
+                  step={1}
+                  onChange={(v) => onChange({ _passthrough: { support_threshold_angle: String(v) } })}
+                />
+                <NumberField
+                  label="Interface layers"
+                  unit="layers"
+                  value={passNumber(config, 'support_interface_top_layers', 3)}
+                  min={0}
+                  max={6}
+                  step={1}
+                  onChange={(v) => onChange({ _passthrough: { support_interface_top_layers: String(v) } })}
+                />
+              </div>
+              <ToggleField
+                label="Support on build plate only"
+                value={passBool(config, 'support_on_build_plate_only', false)}
+                onChange={(v) => onChange({ _passthrough: { support_on_build_plate_only: v ? '1' : '0' } })}
+                className="mt-3"
+              />
+              <p className="mt-2 text-xs text-slate-500">
+                Støtte bygges under overheng brattere enn terskelen. «Build plate only» dropper støtte som ville stått oppå selve modellen.
+              </p>
+            </>
           )}
           <div className="grid grid-cols-2 gap-3 mt-3">
             <NumberField
@@ -1122,6 +1155,20 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       {children}
     </div>
   )
+}
+
+/** Read a numeric engine option that the typed config does not model. */
+function passNumber(config: OrcaConfig, key: string, fallback: number): number {
+  const raw = config._passthrough?.[key]
+  const v = Array.isArray(raw) ? raw[0] : raw
+  const n = typeof v === 'number' ? v : Number.parseFloat(String(v ?? ''))
+  return Number.isFinite(n) ? n : fallback
+}
+function passBool(config: OrcaConfig, key: string, fallback: boolean): boolean {
+  const raw = config._passthrough?.[key]
+  const v = Array.isArray(raw) ? raw[0] : raw
+  if (v === undefined || v === null || v === '') return fallback
+  return String(v) === '1' || String(v) === 'true'
 }
 
 function SelectField({

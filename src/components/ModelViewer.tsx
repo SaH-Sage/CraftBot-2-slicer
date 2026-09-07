@@ -173,6 +173,14 @@ export function ModelViewer({
     renderer.setPixelRatio(window.devicePixelRatio)
     renderer.setSize(w, h)
     renderer.shadowMap.enabled = true
+    // ViewHelper draws itself with its own renderer.render() call, into a small
+    // viewport in the corner (see its render() in the addon source). A clear
+    // triggered by that second call ignores the viewport — it hits the whole
+    // canvas, since nothing here enables the scissor test to restrict it — so
+    // with the default autoClear=true it would wipe out the main scene this
+    // renderer just drew, leaving only that corner widget behind. Clearing
+    // exactly once per frame, ourselves, at the top of the loop avoids that.
+    renderer.autoClear = false
     el.appendChild(renderer.domElement)
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.6))
@@ -508,6 +516,7 @@ export function ModelViewer({
       // ends picks up cleanly with no fight or snap-back between the two.
       if (viewHelper.animating) viewHelper.update(delta)
       else controls.update()
+      renderer.clear()
       renderer.render(scene, camera)
       viewHelper.render(renderer)
     }

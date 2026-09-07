@@ -21,6 +21,14 @@ materialprofilene (PLA, PETG, TPU) er Craftbot sine egne OrcaSlicer-profiler, he
 Jobben laster ned skjæremotoren (ca. 38 MB) fra OrcaWeb sine utgivelser og bygger siden. Ingenting
 kompileres. Hver `git push` til `master` publiserer på nytt.
 
+## Orienteringshjelp (view helper)
+
+Øverst til høyre i 3D-visningen sitter en liten X/Y/Z-indikator som viser hvilken
+vei modellen vender. Klikk på en av de seks aksepunktene for å svinge kameraet
+rett ned den aksen (f.eks. rett ovenfra). Å dra selve indikatoren for å snurre
+kameraet er ikke støttet — bruk resten av 3D-visningen til det, slik du
+allerede gjør.
+
 ## Slicer-visning (lag-for-lag)
 
 Etter en skjæring åpner «Layers»-panelet seg automatisk under 3D-visningen: modellen til venstre,

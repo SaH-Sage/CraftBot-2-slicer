@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { ViewHelper } from 'three/addons/helpers/ViewHelper.js'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import { buildFaceAdjacency, floodFillCoplanar, type FaceAdjacency } from '../lib/face-highlight'
 import { isWebGLAvailable } from '../lib/webgl'
@@ -169,6 +170,15 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
     controls.maxDistance = 5000
     controls.target.set(0, 0, 0)
 
+    // Orientation gizmo (top-right): shows current camera orientation, click an
+    // axis to snap the view to it. three.js's own widget — same one used in the
+    // three.js editor. It does not support dragging the widget itself to orbit;
+    // that's already covered by dragging anywhere else in the viewport via
+    // OrbitControls above.
+    const viewHelper = new ViewHelper(camera, renderer.domElement)
+    viewHelper.setLabels('X', 'Y', 'Z')
+    viewHelper.location = { top: 12, right: 12, bottom: 0, left: null }
+
     // Face picking (place-on-face). A click, not a drag, so orbiting still works.
     // A highlight overlay shows which face is under the cursor before the click commits it.
     const raycaster = new THREE.Raycaster()
@@ -290,8 +300,13 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
     const onPointerUp = (e: PointerEvent) => {
       const start = downAt
       downAt = null
-      if (!start || !pickRef.current.pickTargetId || !pickRef.current.onPickFace) return
-      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 4) return
+      // Only a genuine click (not the release-point of a drag-orbit gesture that
+      // happened to end up over the gizmo's corner) can trigger either the gizmo
+      // or face picking — both read a specific point, and a drag's end point is
+      // incidental, not a choice.
+      const wasClick = !!start && Math.hypot(e.clientX - start.x, e.clientY - start.y) <= 4
+      if (wasClick && viewHelper.handleClick(e)) return
+      if (!wasClick || !pickRef.current.pickTargetId || !pickRef.current.onPickFace) return
       const hit = raycastAt(e.clientX, e.clientY)
       if (!hit || !hit.face) return
       const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
@@ -429,10 +444,19 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
     })
 
     let animId: number
+    const clock = new THREE.Clock()
     const animate = () => {
       animId = requestAnimationFrame(animate)
-      controls.update()
+      const delta = clock.getDelta()
+      viewHelper.center.copy(controls.target)
+      // Exactly one of these may touch the camera on a given frame: OrbitControls
+      // re-derives its own state from the camera's current position/rotation on
+      // every call, so handing back to it the moment the gizmo's snap-animation
+      // ends picks up cleanly with no fight or snap-back between the two.
+      if (viewHelper.animating) viewHelper.update(delta)
+      else controls.update()
       renderer.render(scene, camera)
+      viewHelper.render(renderer)
     }
     animate()
 
@@ -458,6 +482,7 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
       cancelAnimationFrame(animId)
       resizeObs.disconnect()
       controls.dispose()
+      viewHelper.dispose()
       renderer.dispose()
       for (const mesh of meshes) mesh.geometry.dispose()
       material.dispose()

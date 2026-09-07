@@ -21,6 +21,16 @@ materialprofilene (PLA, PETG, TPU) er Craftbot sine egne OrcaSlicer-profiler, he
 Jobben laster ned skjæremotoren (ca. 38 MB) fra OrcaWeb sine utgivelser og bygger siden. Ingenting
 kompileres. Hver `git push` til `master` publiserer på nytt.
 
+## Fri rotasjon (gizmo)
+
+Trykk «Free rotate» på en modell for å feste tre fargede ringer til den midt i
+3D-visningen — dra i en ring for å rotere fritt om den aksen. «Snap»-knappene
+over lista (Av/5°/15°/45°) bestemmer hvor rotasjonen låser seg fast; dra litt
+og modellen hopper til nærmeste steg. Sluttresultatet legges inn i den samme
+rotasjonsverdien som ±90°-knappene bruker, så det som vises er nøyaktig det
+som skjæres. «Free rotate» og «Place on face» kan ikke være aktive samtidig —
+å slå på den ene skrur av den andre.
+
 ## Orienteringshjelp (view helper)
 
 Øverst til høyre i 3D-visningen sitter en liten X/Y/Z-indikator som viser hvilken

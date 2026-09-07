@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import { ViewHelper } from 'three/addons/helpers/ViewHelper.js'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import { buildFaceAdjacency, floodFillCoplanar, type FaceAdjacency } from '../lib/face-highlight'
@@ -31,6 +32,16 @@ interface Props {
   onPickFace?: (id: string, normal: [number, number, number]) => void
   /** Transformed size (mm) of every rendered model, keyed by model id. */
   onBounds?: (sizes: Record<string, [number, number, number]>) => void
+  /** Model id currently attached to the on-model rotate gizmo, or null/undefined. */
+  rotateTargetId?: string | null
+  /** Rotation snap for the gizmo, in degrees. 0/undefined means free (unsnapped) rotation. */
+  rotationSnapDeg?: number
+  /** Fired once a rotate-gizmo drag finishes, with the model's resulting Euler XYZ rotation
+   *  in radians — a full replacement for that model's ObjectTransform.rotation, in the same
+   *  convention plate-tools.ts's own rotate functions use. Not fired continuously during the
+   *  drag: committing to React state on every frame would rebuild this whole WebGL scene
+   *  (and the gizmo along with it) mid-gesture, since ObjectTransform flows back in as a prop. */
+  onRotateEnd?: (id: string, rotation: [number, number, number]) => void
 }
 
 function buildBed(scene: THREE.Scene, bedX: number, bedY: number, bedShape: 'rectangle' | 'circle'): THREE.Object3D[] {
@@ -113,11 +124,23 @@ function applyTransform(mesh: THREE.Mesh, transform: ObjectTransform | undefined
   mesh.rotation.set(transform.rotation[0], transform.rotation[1], transform.rotation[2])
 }
 
-export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 'rectangle', pickTargetId, onPickFace, onBounds }: Props) {
+export function ModelViewer({
+  files,
+  models,
+  bedX = 256,
+  bedY = 256,
+  bedShape = 'rectangle',
+  pickTargetId,
+  onPickFace,
+  onBounds,
+  rotateTargetId,
+  rotationSnapDeg,
+  onRotateEnd,
+}: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
-  // Read through a ref so toggling pick mode does not rebuild the scene.
-  const pickRef = useRef({ pickTargetId, onPickFace, onBounds })
-  pickRef.current = { pickTargetId, onPickFace, onBounds }
+  // Read through a ref so toggling pick/rotate mode does not rebuild the scene.
+  const pickRef = useRef({ pickTargetId, onPickFace, onBounds, rotateTargetId, rotationSnapDeg, onRotateEnd })
+  pickRef.current = { pickTargetId, onPickFace, onBounds, rotateTargetId, rotationSnapDeg, onRotateEnd }
   // Blocking: nothing could be drawn, so the overlay covering the canvas is
   // the whole content. Distinct from `notice` below, which annotates a
   // preview that did render and so must not hide it.
@@ -178,6 +201,26 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
     const viewHelper = new ViewHelper(camera, renderer.domElement)
     viewHelper.setLabels('X', 'Y', 'Z')
     viewHelper.location = { top: 12, right: 12, bottom: 0, left: null }
+
+    // On-model rotate gizmo: three.js's own object-manipulation widget, the
+    // same one DCC tools like Blender use. Rotates the attached mesh directly;
+    // the resulting orientation is read back into ObjectTransform once the
+    // drag ends (see onRotateEnd below), not continuously — see the prop doc.
+    const rotateGizmo = new TransformControls(camera, renderer.domElement)
+    rotateGizmo.setMode('rotate')
+    rotateGizmo.setSpace('world') // matches plate-tools.ts's rotateAboutWorldAxis / the +-90 buttons
+    scene.add(rotateGizmo.getHelper())
+    let attachedRotateId: string | null = null
+    rotateGizmo.addEventListener('dragging-changed', (event) => {
+      // Exactly the same one-owner-per-frame handoff as the ViewHelper snap
+      // animation above: while a rotate drag is live, OrbitControls must not
+      // also try to interpret the same pointer events as an orbit.
+      controls.enabled = !event.value
+      if (event.value === false && attachedRotateId && pickRef.current.onRotateEnd) {
+        const e = rotateGizmo.object!.rotation
+        pickRef.current.onRotateEnd(attachedRotateId, [e.x, e.y, e.z])
+      }
+    })
 
     // Face picking (place-on-face). A click, not a drag, so orbiting still works.
     // A highlight overlay shows which face is under the cursor before the click commits it.
@@ -280,7 +323,7 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
       downAt = { x: e.clientX, y: e.clientY }
     }
     const onPointerMove = (e: PointerEvent) => {
-      if (!pickRef.current.pickTargetId) {
+      if (rotateGizmo.dragging || !pickRef.current.pickTargetId) {
         if (patchMesh.visible || cursorMesh.visible) {
           patchMesh.visible = false
           cursorMesh.visible = false
@@ -305,6 +348,7 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
       // or face picking — both read a specific point, and a drag's end point is
       // incidental, not a choice.
       const wasClick = !!start && Math.hypot(e.clientX - start.x, e.clientY - start.y) <= 4
+      if (rotateGizmo.dragging) return
       if (wasClick && viewHelper.handleClick(e)) return
       if (!wasClick || !pickRef.current.pickTargetId || !pickRef.current.onPickFace) return
       const hit = raycastAt(e.clientX, e.clientY)
@@ -449,6 +493,15 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
       animId = requestAnimationFrame(animate)
       const delta = clock.getDelta()
       viewHelper.center.copy(controls.target)
+      const wantRotateId = pickRef.current.rotateTargetId ?? null
+      if (wantRotateId !== attachedRotateId) {
+        const target = wantRotateId ? meshes.find((m) => m.userData.modelId === wantRotateId) : undefined
+        if (target) rotateGizmo.attach(target)
+        else rotateGizmo.detach()
+        attachedRotateId = target ? wantRotateId : null
+      }
+      const snapDeg = pickRef.current.rotationSnapDeg
+      rotateGizmo.setRotationSnap(snapDeg ? THREE.MathUtils.degToRad(snapDeg) : null)
       // Exactly one of these may touch the camera on a given frame: OrbitControls
       // re-derives its own state from the camera's current position/rotation on
       // every call, so handing back to it the moment the gizmo's snap-animation
@@ -483,6 +536,7 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
       resizeObs.disconnect()
       controls.dispose()
       viewHelper.dispose()
+      rotateGizmo.dispose()
       renderer.dispose()
       for (const mesh of meshes) mesh.geometry.dispose()
       material.dispose()

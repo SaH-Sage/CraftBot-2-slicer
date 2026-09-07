@@ -25,6 +25,12 @@ interface Props {
   /** Model currently waiting for a face click, or null. */
   pickTarget: string | null
   onPickTarget: (id: string | null) => void
+  /** Model currently attached to the free-rotate gizmo, or null. Mutually
+   *  exclusive with pickTarget — activating one clears the other. */
+  rotateTarget: string | null
+  onRotateTarget: (id: string | null) => void
+  rotationSnapDeg: number
+  onRotationSnapDeg: (deg: number) => void
   onApply: (updates: { id: string; transform: ObjectTransform }[]) => void
   onAddFile: (file: File) => void
   disabled?: boolean
@@ -36,7 +42,19 @@ const num = 'w-16 px-1.5 py-1 rounded-md border border-slate-200 text-xs text-ri
 
 export { placeOnFace }
 
-export function TransformPanel({ items, bed, pickTarget, onPickTarget, onApply, onAddFile, disabled }: Props) {
+export function TransformPanel({
+  items,
+  bed,
+  pickTarget,
+  onPickTarget,
+  rotateTarget,
+  onRotateTarget,
+  rotationSnapDeg,
+  onRotationSnapDeg,
+  onApply,
+  onAddFile,
+  disabled,
+}: Props) {
   const [angle, setAngle] = useState(45)
   const [axis, setAxis] = useState<'x' | 'y' | 'z'>('z')
   const [cube, setCube] = useState(20)
@@ -48,8 +66,24 @@ export function TransformPanel({ items, bed, pickTarget, onPickTarget, onApply, 
 
   return (
     <div className="space-y-2">
+      <div className="flex items-center gap-2 text-xs text-slate-500">
+        <span>Snap</span>
+        {[0, 5, 15, 45].map((deg) => (
+          <button
+            key={deg}
+            type="button"
+            className={rotationSnapDeg === deg ? btnOn : btn}
+            disabled={disabled}
+            onClick={() => onRotationSnapDeg(deg)}
+          >
+            {deg === 0 ? 'Off' : `${deg}\u00b0`}
+          </button>
+        ))}
+      </div>
+
       {items.map((item) => {
         const picking = pickTarget === item.id
+        const rotating = rotateTarget === item.id
         return (
           <div key={item.id} className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
@@ -94,13 +128,31 @@ export function TransformPanel({ items, bed, pickTarget, onPickTarget, onApply, 
                 type="button"
                 className={picking ? btnOn : btn}
                 disabled={disabled}
-                onClick={() => onPickTarget(picking ? null : item.id)}
+                onClick={() => {
+                  onPickTarget(picking ? null : item.id)
+                  if (!picking) onRotateTarget(null)
+                }}
                 title="Click a face in the 3D view; that face becomes the bottom"
               >
                 Place on face
               </button>
+              <button
+                type="button"
+                className={rotating ? btnOn : btn}
+                disabled={disabled}
+                onClick={() => {
+                  onRotateTarget(rotating ? null : item.id)
+                  if (!rotating) onPickTarget(null)
+                }}
+                title="Drag the rings in the 3D view to spin the model freely, snapped to the chosen step"
+              >
+                Free rotate
+              </button>
             </div>
             {picking && <p className="text-xs text-orca-600">Klikk på flaten i 3D-visningen som skal ligge mot plata.</p>}
+            {rotating && (
+              <p className="text-xs text-orca-600">Dra i ringene i 3D-visningen for å rotere fritt.</p>
+            )}
 
             <div className="flex flex-wrap items-center gap-2">
               <label className="flex items-center gap-1 text-xs text-slate-500">

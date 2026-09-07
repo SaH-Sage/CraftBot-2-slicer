@@ -191,6 +191,9 @@ export function QueueItemCard({
   pickTargetId,
   onPickFace,
   onBounds,
+  rotateTargetId,
+  rotationSnapDeg,
+  onRotateEnd,
 }: {
   item: QueueItem
   onExport3mf: (item: QueueItem) => Promise<ArrayBuffer>
@@ -200,13 +203,16 @@ export function QueueItemCard({
    *  component the prop shadows that import, which is what should be read. */
   filamentSlotLabels?: string[]
   onAssignExtruder?: (id: string, extruderId: number) => void
-  /** Passed straight through to this card's ModelViewer so "Place on face",
-   *  started from the Model or Settings tab, still works here — the model
-   *  panel that opens automatically after a slice is often the one actually
-   *  on screen when someone reaches for it. */
+  /** Passed straight through to this card's ModelViewer so "Place on face" and
+   *  "Free rotate", started from the Model or Settings tab, still work here —
+   *  the model panel that opens automatically after a slice is often the one
+   *  actually on screen when someone reaches for either. */
   pickTargetId?: string | null
   onPickFace?: (id: string, normal: [number, number, number]) => void
   onBounds?: (sizes: Record<string, [number, number, number]>) => void
+  rotateTargetId?: string | null
+  rotationSnapDeg?: number
+  onRotateEnd?: (id: string, rotation: [number, number, number]) => void
 } & BedProps) {
   const [expanded, setExpanded] = useState(false)
   const [exporting3mf, setExporting3mf] = useState(false)
@@ -411,6 +417,9 @@ export function QueueItemCard({
                     pickTargetId={pickTargetId}
                     onPickFace={onPickFace}
                     onBounds={onBounds}
+                    rotateTargetId={rotateTargetId}
+                    rotationSnapDeg={rotationSnapDeg}
+                    onRotateEnd={onRotateEnd}
                   />
                 </ViewerErrorBoundary>
               </div>

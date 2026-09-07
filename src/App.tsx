@@ -12,7 +12,7 @@ import { type ConfigField, mergeConfigLayers, resolveConfig, revertField } from 
 import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
 import { sameObjectTransform } from './lib/model-transforms'
-import { placeOnFace } from './lib/plate-tools'
+import { current, placeOnFace } from './lib/plate-tools'
 import { TransformPanel } from './components/TransformPanel'
 import type { ImportedProfileType } from './lib/profiles'
 import {
@@ -481,6 +481,8 @@ export default function App() {
   // Manual plate tools: which model is waiting for a face click, and the
   // transformed size of each model as the viewer measured it.
   const [pickTarget, setPickTarget] = useState<string | null>(null)
+  const [rotateTarget, setRotateTarget] = useState<string | null>(null)
+  const [rotationSnapDeg, setRotationSnapDeg] = useState(15)
   const [modelSizes, setModelSizes] = useState<Record<string, [number, number, number]>>({})
   const handlePickFace = useCallback(
     (id: string, normal: [number, number, number]) => {
@@ -491,6 +493,15 @@ export default function App() {
       setPickTarget(null)
     },
     [pickTarget, queue, applyTransforms],
+  )
+  const handleRotateEnd = useCallback(
+    (id: string, rotation: [number, number, number]) => {
+      if (rotateTarget !== null && id !== rotateTarget) return
+      const item = queue.find((q) => q.id === id)
+      if (!item) return
+      applyTransforms([{ id, transform: { ...current(item.transform), rotation, offset: null } }])
+    },
+    [rotateTarget, queue, applyTransforms],
   )
   const transformItems = useMemo(
     () =>
@@ -505,6 +516,10 @@ export default function App() {
       bed={{ x: bedX, y: bedY, z: bedZ }}
       pickTarget={pickTarget}
       onPickTarget={setPickTarget}
+      rotateTarget={rotateTarget}
+      onRotateTarget={setRotateTarget}
+      rotationSnapDeg={rotationSnapDeg}
+      onRotationSnapDeg={setRotationSnapDeg}
       onApply={applyTransforms}
       onAddFile={(file) => addFiles([file])}
       disabled={plateAction !== null}
@@ -772,6 +787,9 @@ export default function App() {
                       pickTargetId={pickTarget}
                       onPickFace={handlePickFace}
                       onBounds={setModelSizes}
+                      rotateTargetId={rotateTarget}
+                      rotationSnapDeg={rotationSnapDeg}
+                      onRotateEnd={handleRotateEnd}
                     />
                   </ViewerErrorBoundary>
                 </div>
@@ -818,6 +836,9 @@ export default function App() {
                       pickTargetId={pickTarget}
                       onPickFace={handlePickFace}
                       onBounds={setModelSizes}
+                      rotateTargetId={rotateTarget}
+                      rotationSnapDeg={rotationSnapDeg}
+                      onRotateEnd={handleRotateEnd}
                     />
                   </ViewerErrorBoundary>
                 </div>
@@ -908,6 +929,9 @@ export default function App() {
                   pickTargetId={pickTarget}
                   onPickFace={handlePickFace}
                   onBounds={setModelSizes}
+                  rotateTargetId={rotateTarget}
+                  rotationSnapDeg={rotationSnapDeg}
+                  onRotateEnd={handleRotateEnd}
                 />
               ))}
             </div>

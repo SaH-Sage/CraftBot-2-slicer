@@ -139,6 +139,12 @@ export function ModelViewer({
   onRotateEnd,
 }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
+  // Survives effect re-runs (unlike anything declared inside the effect) so a
+  // transform commit — rotate, place-on-face, scale — that rebuilds the scene
+  // can put the camera back where the person left it, instead of recomputing
+  // a fresh "fit everything" shot every time. Reset only when the actual set
+  // of models or the bed changes, since those genuinely call for a re-fit.
+  const cameraMemory = useRef<{ key: string; position: THREE.Vector3; target: THREE.Vector3 } | null>(null)
   // Read through a ref so toggling pick/rotate mode does not rebuild the scene.
   const pickRef = useRef({ pickTargetId, onPickFace, onBounds, rotateTargetId, rotationSnapDeg, onRotateEnd })
   pickRef.current = { pickTargetId, onPickFace, onBounds, rotateTargetId, rotationSnapDeg, onRotateEnd }
@@ -147,6 +153,13 @@ export function ModelViewer({
   // preview that did render and so must not hide it.
   const [loadError, setLoadError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  // Orbit-snap is a camera/view aid, not a per-model edit — unlike pick/rotate
+  // targets it never needs to leave this component, so it's plain local state
+  // rather than another prop threaded through App.tsx.
+  const [orbitSnapOn, setOrbitSnapOn] = useState(false)
+  const [orbitSnapDeg, setOrbitSnapDeg] = useState(15)
+  const orbitSnapRef = useRef({ orbitSnapOn, orbitSnapDeg })
+  orbitSnapRef.current = { orbitSnapOn, orbitSnapDeg }
   const fileModels = useMemo(() => files.map((file, index) => ({ id: `file-${index}`, file })), [files])
   const previewModels = models ?? fileModels
 
@@ -242,6 +255,41 @@ export function ModelViewer({
         return lines
       })
     let tickSnapDeg = 0
+
+    // Orbit-snap: the same rotate gizmo + tick marks as above, but attached to
+    // an invisible anchor at the orbit target instead of a model, so dragging
+    // its rings swings the *camera* around the target in fixed steps, with
+    // the same visible snap ticks — the camera-side analogue of "Free rotate".
+    // Reuses the proven mechanism wholesale rather than a hand-rolled drag.
+    const orbitAnchor = new THREE.Object3D()
+    scene.add(orbitAnchor) // TransformControls requires its target be in the scene graph
+    const orbitGizmo = new TransformControls(camera, renderer.domElement)
+    orbitGizmo.setMode('rotate')
+    orbitGizmo.setSpace('world')
+    const orbitHelper = orbitGizmo.getHelper()
+    scene.add(orbitHelper)
+    const orbitGizmoObj = orbitHelper.children.find((c) => (c as { isTransformControlsGizmo?: boolean }).isTransformControlsGizmo) as
+      | (THREE.Object3D & { gizmo: { rotate: THREE.Object3D } })
+      | undefined
+    const orbitRingGroup = orbitGizmoObj?.gizmo.rotate
+    const orbitTickColors: Record<'X' | 'Y' | 'Z', number> = { X: 0xff2060, Y: 0x20e070, Z: 0x2090ff }
+    const orbitTickLines =
+      orbitRingGroup &&
+      (['X', 'Y', 'Z'] as const).map((axis) => {
+        const lines = createAxisTickLines(axis, orbitSnapRef.current.orbitSnapDeg, orbitTickColors[axis])
+        orbitRingGroup.add(lines)
+        return lines
+      })
+    let orbitTickSnapDeg = -1
+    let orbitAttached = false
+    let orbitOffsetStart = new THREE.Vector3()
+    orbitGizmo.addEventListener('dragging-changed', (event) => {
+      controls.enabled = !event.value
+      if (event.value === true) {
+        orbitOffsetStart = camera.position.clone().sub(controls.target)
+        orbitAnchor.quaternion.identity()
+      }
+    })
     let attachedRotateId: string | null = null
     rotateGizmo.addEventListener('dragging-changed', (event) => {
       // Exactly the same one-owner-per-frame handoff as the ViewHelper snap
@@ -408,6 +456,7 @@ export function ModelViewer({
     let cancelled = false
 
     const shown = previewModels.slice(0, MAX_PREVIEW_MODELS)
+    const cameraMemoryKey = `${shown.map((m) => m.id).sort().join(',')}|${bedX}|${bedY}|${bedShape}`
     const skippedCount = previewModels.length - shown.length
 
     void Promise.all(
@@ -502,20 +551,30 @@ export function ModelViewer({
       }
       pickRef.current.onBounds?.(sizes)
 
-      // Fit camera to the bed and all transformed models — Z-up: position
-      // camera above and to the side.
-      const maxZ = Math.max(sceneBounds.max.z, 0)
-      const maxDim = Math.max(
-        bedX,
-        bedY,
-        sceneBounds.getSize(new THREE.Vector3()).x,
-        sceneBounds.getSize(new THREE.Vector3()).y,
-        maxZ,
-        50,
-      )
-      const dist = maxDim * 2
-      camera.position.set(dist * 0.6, -dist, dist * 0.7)
-      controls.target.set(0, 0, maxZ / 2)
+      // Camera framing. A rotate/place-on-face/scale commit rebuilds this
+      // whole effect (the new transform arrives as a prop), so without this
+      // check every such commit would silently reset the view — restoring
+      // is what makes a commit feel like "the object moved", not "the
+      // camera did". Only actually re-fit when the model set or bed changed.
+      const remembered = cameraMemory.current
+      if (remembered && remembered.key === cameraMemoryKey) {
+        camera.position.copy(remembered.position)
+        controls.target.copy(remembered.target)
+      } else {
+        // Framed on the model itself, not the bed: a 20 mm part on a 250 mm
+        // bed should fill the view, the way a real slicer zooms to the part
+        // rather than always showing the whole build plate.
+        const modelSize = sceneBounds.getSize(new THREE.Vector3())
+        const modelMaxDim = Math.max(modelSize.x, modelSize.y, modelSize.z, 10)
+        const maxZ = Math.max(sceneBounds.max.z, 0)
+        // Distance so the model's bounding size spans roughly half the
+        // camera's vertical field of view: for a target angular size of
+        // fov/2, dist = r / tan(fov/4), r = modelMaxDim/2.
+        const dist = modelMaxDim * 0.5 / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 4)
+        const viewDir = new THREE.Vector3(0.6, -1, 0.7).normalize()
+        controls.target.set(0, 0, maxZ / 2)
+        camera.position.copy(controls.target).addScaledVector(viewDir, dist)
+      }
       controls.update()
     })
 
@@ -541,12 +600,36 @@ export function ModelViewer({
         }
         tickSnapDeg = snapDeg
       }
+
+      orbitAnchor.position.copy(controls.target)
+      const wantOrbit = orbitSnapRef.current.orbitSnapOn
+      if (wantOrbit !== orbitAttached) {
+        if (wantOrbit) orbitGizmo.attach(orbitAnchor)
+        else orbitGizmo.detach()
+        orbitAttached = wantOrbit
+      }
+      const orbitDeg = orbitSnapRef.current.orbitSnapDeg
+      orbitGizmo.setRotationSnap(THREE.MathUtils.degToRad(orbitDeg))
+      if (orbitTickLines && orbitDeg !== orbitTickSnapDeg) {
+        for (const lines of orbitTickLines) {
+          lines.geometry.dispose()
+          lines.geometry = buildAxisTickGeometry(lines.name as 'X' | 'Y' | 'Z', orbitDeg)
+        }
+        orbitTickSnapDeg = orbitDeg
+      }
+
       // Exactly one of these may touch the camera on a given frame: OrbitControls
       // re-derives its own state from the camera's current position/rotation on
-      // every call, so handing back to it the moment the gizmo's snap-animation
-      // ends picks up cleanly with no fight or snap-back between the two.
-      if (viewHelper.animating) viewHelper.update(delta)
-      else controls.update()
+      // every call, so handing back to it the moment either gizmo's interaction
+      // ends picks up cleanly with no fight or snap-back between them.
+      if (viewHelper.animating) {
+        viewHelper.update(delta)
+      } else if (orbitGizmo.dragging) {
+        camera.position.copy(controls.target).add(orbitOffsetStart.clone().applyQuaternion(orbitAnchor.quaternion))
+        camera.lookAt(controls.target)
+      } else {
+        controls.update()
+      }
       renderer.clear()
       renderer.render(scene, camera)
       viewHelper.render(renderer)
@@ -563,6 +646,7 @@ export function ModelViewer({
     resizeObs.observe(el)
 
     return () => {
+      cameraMemory.current = { key: cameraMemoryKey, position: camera.position.clone(), target: controls.target.clone() }
       cancelled = true
       renderer.domElement.removeEventListener('pointerdown', onPointerDown)
       renderer.domElement.removeEventListener('pointermove', onPointerMove)
@@ -578,6 +662,8 @@ export function ModelViewer({
       viewHelper.dispose()
       if (tickLines) for (const lines of tickLines) { lines.geometry.dispose(); (lines.material as THREE.Material).dispose() }
       rotateGizmo.dispose()
+      if (orbitTickLines) for (const lines of orbitTickLines) { lines.geometry.dispose(); (lines.material as THREE.Material).dispose() }
+      orbitGizmo.dispose()
       renderer.dispose()
       for (const mesh of meshes) mesh.geometry.dispose()
       material.dispose()
@@ -600,6 +686,36 @@ export function ModelViewer({
   return (
     <div className="relative w-full h-full min-h-48">
       <div ref={mountRef} className="w-full h-full rounded-xl overflow-hidden" style={{ touchAction: 'none' }} />
+      {!loadError && (
+        <div className="absolute left-2 bottom-9 flex items-center gap-1 rounded-lg bg-white/90 border border-slate-200 px-1.5 py-1 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setOrbitSnapOn((v) => !v)}
+            title="Drag the rings to orbit the view in fixed steps, instead of freehand"
+            className={
+              orbitSnapOn
+                ? 'px-2 py-1 rounded-md bg-orca-500 text-white text-xs font-medium'
+                : 'px-2 py-1 rounded-md text-slate-600 text-xs font-medium hover:bg-slate-100'
+            }
+          >
+            Orbit snap
+          </button>
+          {orbitSnapOn && (
+            <select
+              value={orbitSnapDeg}
+              onChange={(e) => setOrbitSnapDeg(Number(e.target.value))}
+              className="text-xs border border-slate-200 rounded-md px-1 py-1 bg-white text-slate-600"
+              aria-label="Orbit snap increment"
+            >
+              {[5, 10, 15, 45].map((d) => (
+                <option key={d} value={d}>
+                  {d}°
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
       {loadError && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-50/80 text-sm text-slate-500">
           {loadError}

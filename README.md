@@ -21,6 +21,14 @@ materialprofilene (PLA, PETG, TPU) er Craftbot sine egne OrcaSlicer-profiler, he
 Jobben laster ned skjæremotoren (ca. 38 MB) fra OrcaWeb sine utgivelser og bygger siden. Ingenting
 kompileres. Hver `git push` til `master` publiserer på nytt.
 
+## Kameraet er nærmere modellen som standard
+
+3D-visningen zoomer nå til selve modellen, ikke hele platen — en liten del
+fyller mesteparten av bildet i stedet for å drukne på en 250 × 200 mm plate.
+Roterer eller flytter du en modell (Place on face, Free rotate, skalering)
+beholder kameraet posisjonen du selv har satt, i stedet for å hoppe tilbake
+til standardvisningen — det nullstilles bare når du bytter fil eller maskin.
+
 ## Fri rotasjon (gizmo)
 
 Trykk «Free rotate» på en modell for å feste tre fargede ringer til den midt i
@@ -30,6 +38,14 @@ og modellen hopper til nærmeste steg. Sluttresultatet legges inn i den samme
 rotasjonsverdien som ±90°-knappene bruker, så det som vises er nøyaktig det
 som skjæres. «Free rotate» og «Place on face» kan ikke være aktive samtidig —
 å slå på den ene skrur av den andre.
+
+## Orbit snap (kameraet)
+
+Nede til venstre i 3D-visningen er det en «Orbit snap»-knapp. Slår du den på,
+dukker det opp tre ringer med de samme snap-strekene som i «Free rotate» —
+denne gangen rundt punktet kameraet svinger om, ikke rundt modellen. Dra i en
+ring for å svinge *visningen* i faste steg (5/10/15/45°) i stedet for
+frihånd. Vanlig dra-for-å-rotere andre steder i visningen virker som før.
 
 ## Snap-streker på rotasjonsringene
 

@@ -769,7 +769,7 @@ export default function App() {
                       bedX={bedX}
                       bedY={bedY}
                       bedShape={bedShape}
-                      pickMode={pickTarget !== null}
+                      pickTargetId={pickTarget}
                       onPickFace={handlePickFace}
                       onBounds={setModelSizes}
                     />
@@ -815,7 +815,7 @@ export default function App() {
                       bedX={bedX}
                       bedY={bedY}
                       bedShape={bedShape}
-                      pickMode={pickTarget !== null}
+                      pickTargetId={pickTarget}
                       onPickFace={handlePickFace}
                       onBounds={setModelSizes}
                     />

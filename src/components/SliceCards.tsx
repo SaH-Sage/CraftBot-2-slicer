@@ -203,6 +203,11 @@ export function QueueItemCard({
   const [export3mfError, setExport3mfError] = useState<string | null>(null)
   const statsLabel = useMemo(() => (item.gcode ? gcodeStatsLabel(extractGcodeStats(item.gcode)) : ''), [item.gcode])
   const { gcode, gcodeFilename } = item
+  // Open the layer/toolpath view on its own the first time this item finishes —
+  // it is the main way to check a print before downloading it, not an opt-in extra.
+  useEffect(() => {
+    if (gcode) setExpanded(true)
+  }, [gcode])
   // Stable array reference so ModelViewer's effect doesn't recreate the
   // WebGL scene on every unrelated re-render while the card is expanded.
   const previewFiles = useMemo(() => (item.stlFile ? [item.stlFile] : []), [item.stlFile])
@@ -309,10 +314,17 @@ export function QueueItemCard({
             <button
               type="button"
               onClick={() => setExpanded((e) => !e)}
-              title="Preview G-code"
-              className="text-slate-300 hover:text-slate-600 transition-colors p-1"
+              title="Model and layer-by-layer toolpath preview"
+              aria-expanded={expanded}
+              className={clsx(
+                'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
+                expanded
+                  ? 'border-orca-300 bg-orca-50 text-orca-700'
+                  : 'border-slate-300 text-slate-600 hover:border-orca-300 hover:text-orca-600',
+              )}
             >
-              <EyeIcon className="w-4 h-4" />
+              <EyeIcon className="w-3.5 h-3.5" />
+              Layers
             </button>
             <button
               type="button"
@@ -375,10 +387,10 @@ export function QueueItemCard({
 
       {expanded && item.stlFile && item.gcode && (
         <div className="border-t border-slate-100">
-          <div className="grid sm:grid-cols-2" style={{ height: 300 }}>
+          <div className="grid sm:grid-cols-2" style={{ height: 380 }}>
             <div className="border-r border-slate-100">
               <div className="px-3 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Model</div>
-              <div style={{ height: 270 }}>
+              <div style={{ height: 350 }}>
                 <ViewerErrorBoundary key={item.id} message="3D preview unavailable">
                   <ModelViewer
                     files={previewFiles}
@@ -394,7 +406,7 @@ export function QueueItemCard({
               <div className="px-3 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
                 G-code
               </div>
-              <div style={{ height: 270 }}>
+              <div style={{ height: 350 }}>
                 <ViewerErrorBoundary key={`${item.id}-${item.gcode}`} message="G-code preview unavailable">
                   <GcodeViewer gcode={item.gcode} bedX={bedX} bedY={bedY} bedShape={bedShape} />
                 </ViewerErrorBoundary>
@@ -414,6 +426,9 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
   // so bind it once here instead of asserting non-null at each use.
   const plateGcode = plate.gcode
   const [expanded, setExpanded] = useState(false)
+  useEffect(() => {
+    if (plateGcode) setExpanded(true)
+  }, [plateGcode])
   const statsLabel = useMemo(() => (plate.gcode ? gcodeStatsLabel(extractGcodeStats(plate.gcode)) : ''), [plate.gcode])
 
   return (
@@ -463,10 +478,17 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
             <button
               type="button"
               onClick={() => setExpanded((e) => !e)}
-              title="Preview G-code"
-              className="text-slate-300 hover:text-slate-600 transition-colors p-1"
+              title="Model and layer-by-layer toolpath preview"
+              aria-expanded={expanded}
+              className={clsx(
+                'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
+                expanded
+                  ? 'border-orca-300 bg-orca-50 text-orca-700'
+                  : 'border-slate-300 text-slate-600 hover:border-orca-300 hover:text-orca-600',
+              )}
             >
-              <EyeIcon className="w-4 h-4" />
+              <EyeIcon className="w-3.5 h-3.5" />
+              Layers
             </button>
             <button
               type="button"
@@ -497,7 +519,7 @@ export function PlateResultCard({ plate, bedX, bedY, bedShape }: { plate: PlateS
       )}
 
       {expanded && plate.gcode && (
-        <div className="border-t border-slate-100 bg-slate-900" style={{ height: 300 }}>
+        <div className="border-t border-slate-100 bg-slate-900" style={{ height: 380 }}>
           <ViewerErrorBoundary key={plate.gcode} message="G-code preview unavailable">
             <GcodeViewer gcode={plate.gcode} bedX={bedX} bedY={bedY} bedShape={bedShape} />
           </ViewerErrorBoundary>

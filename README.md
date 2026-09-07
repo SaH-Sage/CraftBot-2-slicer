@@ -21,11 +21,18 @@ materialprofilene (PLA, PETG, TPU) er Craftbot sine egne OrcaSlicer-profiler, he
 Jobben laster ned skjæremotoren (ca. 38 MB) fra OrcaWeb sine utgivelser og bygger siden. Ingenting
 kompileres. Hver `git push` til `master` publiserer på nytt.
 
+## Slicer-visning (lag-for-lag)
+
+Etter en skjæring åpner «Layers»-panelet seg automatisk under 3D-visningen: modellen til venstre,
+selve verktøybanen (toolpath) til høyre med fargekodede funksjoner (yttervegg, fyll, støtte osv.),
+en glidebryter for å bla gjennom lagene ett og ett, og en «Travels»-knapp som viser
+tomkjøringene. Trykk «Layers»-knappen for å skjule/vise det igjen.
+
 ## Plassering av modellen (plate tools)
 
 Under 3D-visningen har hver modell sine egne verktøy: roter ±90° om X/Y/Z eller en valgfri vinkel,
 **Place on face** (trykk knappen og klikk på flaten i 3D-visningen som skal ligge mot plata),
-skalering i prosent, **Fit to bed**, speiling og nullstilling. Auto-orient og Arrange finnes fortsatt.
+skalering i prosent, **Fit to bed**, speiling og nullstilling. Når «Place on face» er aktiv, lyser flaten som er under peikeren opp idet du beveger musa over modellen, så du ser nøyaktig hvilken flate du er i ferd med å velge før du klikker. Auto-orient og Arrange finnes fortsatt.
 Nederst kan du lage en kube eller sylinder i valgfri størrelse til testutskrifter.
 
 Under *Supports & Adhesion* i innstillingene ligger også terskelvinkel for overheng, antall

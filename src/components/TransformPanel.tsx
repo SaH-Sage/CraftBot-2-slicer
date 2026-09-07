@@ -80,7 +80,7 @@ export function TransformPanel({ items, bed, pickTarget, onPickTarget, onApply, 
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <input type="number" className={num} value={angle} step={1} onChange={(e) => setAngle(Number(e.target.value))} aria-label="Angle in degrees" />
+              <input type="number" className={num} value={angle} step={1} onChange={(e) => setAngle(Number(e.target.value) || 0)} aria-label="Angle in degrees" />
               <span className="text-xs text-slate-500">° about</span>
               <select className="px-1.5 py-1 rounded-md border border-slate-200 text-xs" value={axis} onChange={(e) => setAxis(e.target.value as 'x' | 'y' | 'z')} aria-label="Axis">
                 <option value="x">X</option>
@@ -113,7 +113,7 @@ export function TransformPanel({ items, bed, pickTarget, onPickTarget, onApply, 
                   max={10000}
                   step={1}
                   disabled={disabled}
-                  onChange={(e) => apply(item.id, setUniformScale(item.transform, Number(e.target.value) / 100))}
+                  onChange={(e) => apply(item.id, setUniformScale(item.transform, (Number(e.target.value) || 100) / 100))}
                   aria-label="Scale percent"
                 />
                 %
@@ -144,15 +144,15 @@ export function TransformPanel({ items, bed, pickTarget, onPickTarget, onApply, 
       <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3">
         <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-2">Legg til enkel form (til testutskrift)</div>
         <div className="flex flex-wrap items-center gap-2">
-          <input type="number" className={num} value={cube} min={1} max={200} onChange={(e) => setCube(Number(e.target.value))} aria-label="Cube size mm" />
-          <button type="button" className={btn} disabled={disabled} onClick={() => onAddFile(primitiveFile('box', [cube, cube, cube]))}>
+          <input type="number" className={num} value={cube} min={1} max={200} onChange={(e) => setCube(Number(e.target.value) || 1)} aria-label="Cube size mm" />
+          <button type="button" className={btn} disabled={disabled} onClick={() => onAddFile(primitiveFile('box', [Math.max(1, cube), Math.max(1, cube), Math.max(1, cube)]))}>
             Cube (mm)
           </button>
           <span className="mx-1 text-slate-300">|</span>
-          <input type="number" className={num} value={cylD} min={1} max={200} onChange={(e) => setCylD(Number(e.target.value))} aria-label="Cylinder diameter mm" />
+          <input type="number" className={num} value={cylD} min={1} max={200} onChange={(e) => setCylD(Number(e.target.value) || 1)} aria-label="Cylinder diameter mm" />
           <span className="text-xs text-slate-500">⌀ ×</span>
-          <input type="number" className={num} value={cylH} min={1} max={200} onChange={(e) => setCylH(Number(e.target.value))} aria-label="Cylinder height mm" />
-          <button type="button" className={btn} disabled={disabled} onClick={() => onAddFile(primitiveFile('cylinder', [cylD, cylH]))}>
+          <input type="number" className={num} value={cylH} min={1} max={200} onChange={(e) => setCylH(Number(e.target.value) || 1)} aria-label="Cylinder height mm" />
+          <button type="button" className={btn} disabled={disabled} onClick={() => onAddFile(primitiveFile('cylinder', [Math.max(1, cylD), Math.max(1, cylH)]))}>
             Cylinder (mm)
           </button>
         </div>

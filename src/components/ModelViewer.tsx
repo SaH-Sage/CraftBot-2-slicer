@@ -22,8 +22,9 @@ interface Props {
   bedY?: number
   /** Bed shape — 'circle' for delta/round printers, default 'rectangle' */
   bedShape?: 'rectangle' | 'circle'
-  /** When true, a click on a model face calls onPickFace instead of orbiting. */
-  pickMode?: boolean
+  /** Model id currently waiting for a face pick, or null/undefined for normal orbit behaviour.
+   *  Hover highlighting and click-to-pick are both restricted to this model. */
+  pickTargetId?: string | null
   /** Picked face: model id and the face's outward normal in world space. */
   onPickFace?: (id: string, normal: [number, number, number]) => void
   /** Transformed size (mm) of every rendered model, keyed by model id. */
@@ -110,11 +111,11 @@ function applyTransform(mesh: THREE.Mesh, transform: ObjectTransform | undefined
   mesh.rotation.set(transform.rotation[0], transform.rotation[1], transform.rotation[2])
 }
 
-export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 'rectangle', pickMode, onPickFace, onBounds }: Props) {
+export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 'rectangle', pickTargetId, onPickFace, onBounds }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
   // Read through a ref so toggling pick mode does not rebuild the scene.
-  const pickRef = useRef({ pickMode, onPickFace, onBounds })
-  pickRef.current = { pickMode, onPickFace, onBounds }
+  const pickRef = useRef({ pickTargetId, onPickFace, onBounds })
+  pickRef.current = { pickTargetId, onPickFace, onBounds }
   // Blocking: nothing could be drawn, so the overlay covering the canvas is
   // the whole content. Distinct from `notice` below, which annotates a
   // preview that did render and so must not hide it.
@@ -168,27 +169,89 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
     controls.target.set(0, 0, 0)
 
     // Face picking (place-on-face). A click, not a drag, so orbiting still works.
+    // A highlight overlay shows which face is under the cursor before the click commits it.
     const raycaster = new THREE.Raycaster()
+    const highlightGeometry = new THREE.BufferGeometry()
+    highlightGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3))
+    const highlightMesh = new THREE.Mesh(
+      highlightGeometry,
+      new THREE.MeshBasicMaterial({
+        color: 0xf97316,
+        transparent: true,
+        opacity: 0.6,
+        side: THREE.DoubleSide,
+        depthTest: true,
+        polygonOffset: true,
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4,
+      }),
+    )
+    highlightMesh.visible = false
+    highlightMesh.renderOrder = 999
+    scene.add(highlightMesh)
+
+    function pickableTarget(): THREE.Mesh[] {
+      const id = pickRef.current.pickTargetId
+      if (!id) return []
+      return meshes.filter((m) => m.userData.modelId === id)
+    }
+    function raycastAt(clientX: number, clientY: number) {
+      const rect = renderer.domElement.getBoundingClientRect()
+      const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1)
+      raycaster.setFromCamera(ndc, camera)
+      return raycaster.intersectObjects(pickableTarget(), false)[0]
+    }
+
     let downAt: { x: number; y: number } | null = null
     const onPointerDown = (e: PointerEvent) => {
       downAt = { x: e.clientX, y: e.clientY }
     }
+    const onPointerMove = (e: PointerEvent) => {
+      if (!pickRef.current.pickTargetId) {
+        if (highlightMesh.visible) highlightMesh.visible = false
+        return
+      }
+      const hit = raycastAt(e.clientX, e.clientY)
+      renderer.domElement.style.cursor = hit ? 'pointer' : 'crosshair'
+      if (!hit || !hit.face) {
+        highlightMesh.visible = false
+        return
+      }
+      // Triangle vertices in world space, nudged along the world normal so the
+      // overlay sits just in front of the real surface (avoids z-fighting).
+      const pos = (hit.object as THREE.Mesh).geometry.getAttribute('position')
+      const worldNormal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
+      const nudge = worldNormal.clone().multiplyScalar(0.05)
+      const arr = highlightGeometry.attributes.position.array as Float32Array
+      const corners: (keyof typeof hit.face)[] = ['a', 'b', 'c']
+      corners.forEach((key, i) => {
+        const v = new THREE.Vector3().fromBufferAttribute(pos, hit.face![key as 'a'])
+        v.applyMatrix4(hit.object.matrixWorld).add(nudge)
+        arr[i * 3] = v.x
+        arr[i * 3 + 1] = v.y
+        arr[i * 3 + 2] = v.z
+      })
+      highlightGeometry.attributes.position.needsUpdate = true
+      highlightGeometry.computeBoundingSphere()
+      highlightMesh.visible = true
+    }
     const onPointerUp = (e: PointerEvent) => {
       const start = downAt
       downAt = null
-      if (!start || !pickRef.current.pickMode || !pickRef.current.onPickFace) return
+      if (!start || !pickRef.current.pickTargetId || !pickRef.current.onPickFace) return
       if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 4) return
-      const rect = renderer.domElement.getBoundingClientRect()
-      const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1)
-      raycaster.setFromCamera(ndc, camera)
-      const hit = raycaster.intersectObjects(meshes, false)[0]
+      const hit = raycastAt(e.clientX, e.clientY)
       if (!hit || !hit.face) return
       const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
       const id = (hit.object as THREE.Mesh).userData.modelId as string | undefined
       if (id) pickRef.current.onPickFace(id, [normal.x, normal.y, normal.z])
     }
     renderer.domElement.addEventListener('pointerdown', onPointerDown)
+    renderer.domElement.addEventListener('pointermove', onPointerMove)
     renderer.domElement.addEventListener('pointerup', onPointerUp)
+    renderer.domElement.addEventListener('pointerleave', () => {
+      highlightMesh.visible = false
+    })
 
     const loader = new STLLoader()
     const meshes: THREE.Mesh[] = []
@@ -331,7 +394,11 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
     return () => {
       cancelled = true
       renderer.domElement.removeEventListener('pointerdown', onPointerDown)
+      renderer.domElement.removeEventListener('pointermove', onPointerMove)
       renderer.domElement.removeEventListener('pointerup', onPointerUp)
+      renderer.domElement.style.cursor = 'auto'
+      highlightGeometry.dispose()
+      ;(highlightMesh.material as THREE.Material).dispose()
       cancelAnimationFrame(animId)
       resizeObs.disconnect()
       controls.dispose()

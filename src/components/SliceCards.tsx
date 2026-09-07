@@ -188,6 +188,9 @@ export function QueueItemCard({
   onExport3mf,
   filamentSlotLabels,
   onAssignExtruder,
+  pickTargetId,
+  onPickFace,
+  onBounds,
 }: {
   item: QueueItem
   onExport3mf: (item: QueueItem) => Promise<ArrayBuffer>
@@ -197,6 +200,13 @@ export function QueueItemCard({
    *  component the prop shadows that import, which is what should be read. */
   filamentSlotLabels?: string[]
   onAssignExtruder?: (id: string, extruderId: number) => void
+  /** Passed straight through to this card's ModelViewer so "Place on face",
+   *  started from the Model or Settings tab, still works here — the model
+   *  panel that opens automatically after a slice is often the one actually
+   *  on screen when someone reaches for it. */
+  pickTargetId?: string | null
+  onPickFace?: (id: string, normal: [number, number, number]) => void
+  onBounds?: (sizes: Record<string, [number, number, number]>) => void
 } & BedProps) {
   const [expanded, setExpanded] = useState(false)
   const [exporting3mf, setExporting3mf] = useState(false)
@@ -398,6 +408,9 @@ export function QueueItemCard({
                     bedX={bedX}
                     bedY={bedY}
                     bedShape={bedShape}
+                    pickTargetId={pickTargetId}
+                    onPickFace={onPickFace}
+                    onBounds={onBounds}
                   />
                 </ViewerErrorBoundary>
               </div>

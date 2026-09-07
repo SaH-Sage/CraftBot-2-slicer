@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
+import { buildFaceAdjacency, floodFillCoplanar, type FaceAdjacency } from '../lib/face-highlight'
 import { isWebGLAvailable } from '../lib/webgl'
 import type { ObjectTransform } from '../types'
 
@@ -171,24 +172,36 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
     // Face picking (place-on-face). A click, not a drag, so orbiting still works.
     // A highlight overlay shows which face is under the cursor before the click commits it.
     const raycaster = new THREE.Raycaster()
-    const highlightGeometry = new THREE.BufferGeometry()
-    highlightGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3))
-    const highlightMesh = new THREE.Mesh(
-      highlightGeometry,
-      new THREE.MeshBasicMaterial({
-        color: 0xf97316,
-        transparent: true,
-        opacity: 0.6,
-        side: THREE.DoubleSide,
-        depthTest: true,
-        polygonOffset: true,
-        polygonOffsetFactor: -4,
-        polygonOffsetUnits: -4,
-      }),
-    )
-    highlightMesh.visible = false
-    highlightMesh.renderOrder = 999
-    scene.add(highlightMesh)
+    // Highlight overlay: the flat patch under the cursor (flood-filled from the
+    // hit triangle out to its coplanar neighbours — see lib/face-highlight.ts),
+    // plus a small fixed-size disc at the exact hit point. The patch alone
+    // isn't enough on a real-world STL: a flat face reads clearly, but a
+    // single triangle on fine, curved detail (e.g. a thread) can be a
+    // fraction of a square micrometre — technically highlighted, invisibly
+    // so. The disc guarantees a visible marker everywhere, and the patch
+    // adds the true face outline whenever there is one worth showing.
+    const highlightMat = new THREE.MeshBasicMaterial({
+      color: 0xf97316,
+      transparent: true,
+      opacity: 0.55,
+      side: THREE.DoubleSide,
+      depthTest: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4,
+    })
+    const patchGeometry = new THREE.BufferGeometry()
+    const patchMesh = new THREE.Mesh(patchGeometry, highlightMat)
+    patchMesh.visible = false
+    patchMesh.renderOrder = 999
+    scene.add(patchMesh)
+
+    const cursorGeometry = new THREE.CircleGeometry(1.4, 24)
+    const cursorMesh = new THREE.Mesh(cursorGeometry, highlightMat.clone())
+    ;(cursorMesh.material as THREE.MeshBasicMaterial).opacity = 0.85
+    cursorMesh.visible = false
+    cursorMesh.renderOrder = 1000
+    scene.add(cursorMesh)
 
     function pickableTarget(): THREE.Mesh[] {
       const id = pickRef.current.pickTargetId
@@ -202,38 +215,77 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
       return raycaster.intersectObjects(pickableTarget(), false)[0]
     }
 
+    // Recomputing the flood-fill is the one non-trivial cost here; skip it
+    // when the pointer is still over the same triangle it was last frame.
+    let cachedMesh: THREE.Mesh | null = null
+    let cachedSeed = -1
+    let cachedPatch: number[] = []
+    function updatePatchGeometry(hit: THREE.Intersection, worldNormal: THREE.Vector3) {
+      const mesh = hit.object as THREE.Mesh
+      const adjacency = mesh.userData.faceAdjacency as FaceAdjacency | null | undefined
+      const seed = hit.faceIndex ?? -1
+      let patch: number[]
+      if (adjacency && mesh === cachedMesh && seed === cachedSeed) {
+        patch = cachedPatch
+      } else if (adjacency && seed >= 0) {
+        patch = floodFillCoplanar(adjacency, seed)
+        cachedMesh = mesh
+        cachedSeed = seed
+        cachedPatch = patch
+      } else {
+        patch = seed >= 0 ? [seed] : []
+      }
+      const pos = mesh.geometry.getAttribute('position')
+      const arr = new Float32Array(patch.length * 9)
+      const v = new THREE.Vector3()
+      const n = new THREE.Vector3()
+      patch.forEach((t, pi) => {
+        for (let k = 0; k < 3; k++) {
+          v.fromBufferAttribute(pos, t * 3 + k)
+          n.set(0, 0, 1)
+          if (adjacency) n.set(adjacency.normals[t * 3], adjacency.normals[t * 3 + 1], adjacency.normals[t * 3 + 2])
+          n.transformDirection(mesh.matrixWorld).normalize()
+          v.applyMatrix4(mesh.matrixWorld).addScaledVector(n, 0.05)
+          arr[pi * 9 + k * 3] = v.x
+          arr[pi * 9 + k * 3 + 1] = v.y
+          arr[pi * 9 + k * 3 + 2] = v.z
+        }
+      })
+      patchGeometry.setAttribute('position', new THREE.BufferAttribute(arr, 3))
+      patchGeometry.attributes.position.needsUpdate = true
+      patchGeometry.computeBoundingSphere()
+      // Only worth drawing the patch shape when it covers more than the
+      // cursor disc already does — otherwise it's the same single sliver
+      // the disc is there to compensate for, doubled up for no benefit.
+      patchMesh.visible = patch.length > 1
+      // Point the disc's local +Z (its natural facing direction) along the
+      // world hit normal, and sit it at the exact hit point.
+      cursorMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), worldNormal)
+      cursorMesh.position.copy(hit.point).addScaledVector(worldNormal, 0.06)
+      cursorMesh.visible = true
+    }
+
     let downAt: { x: number; y: number } | null = null
     const onPointerDown = (e: PointerEvent) => {
       downAt = { x: e.clientX, y: e.clientY }
     }
     const onPointerMove = (e: PointerEvent) => {
       if (!pickRef.current.pickTargetId) {
-        if (highlightMesh.visible) highlightMesh.visible = false
+        if (patchMesh.visible || cursorMesh.visible) {
+          patchMesh.visible = false
+          cursorMesh.visible = false
+        }
         return
       }
       const hit = raycastAt(e.clientX, e.clientY)
       renderer.domElement.style.cursor = hit ? 'pointer' : 'crosshair'
       if (!hit || !hit.face) {
-        highlightMesh.visible = false
+        patchMesh.visible = false
+        cursorMesh.visible = false
         return
       }
-      // Triangle vertices in world space, nudged along the world normal so the
-      // overlay sits just in front of the real surface (avoids z-fighting).
-      const pos = (hit.object as THREE.Mesh).geometry.getAttribute('position')
       const worldNormal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
-      const nudge = worldNormal.clone().multiplyScalar(0.05)
-      const arr = highlightGeometry.attributes.position.array as Float32Array
-      const corners: (keyof typeof hit.face)[] = ['a', 'b', 'c']
-      corners.forEach((key, i) => {
-        const v = new THREE.Vector3().fromBufferAttribute(pos, hit.face![key as 'a'])
-        v.applyMatrix4(hit.object.matrixWorld).add(nudge)
-        arr[i * 3] = v.x
-        arr[i * 3 + 1] = v.y
-        arr[i * 3 + 2] = v.z
-      })
-      highlightGeometry.attributes.position.needsUpdate = true
-      highlightGeometry.computeBoundingSphere()
-      highlightMesh.visible = true
+      updatePatchGeometry(hit, worldNormal)
     }
     const onPointerUp = (e: PointerEvent) => {
       const start = downAt
@@ -250,7 +302,8 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
     renderer.domElement.addEventListener('pointermove', onPointerMove)
     renderer.domElement.addEventListener('pointerup', onPointerUp)
     renderer.domElement.addEventListener('pointerleave', () => {
-      highlightMesh.visible = false
+      patchMesh.visible = false
+      cursorMesh.visible = false
     })
 
     const loader = new STLLoader()
@@ -312,6 +365,7 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
         const mesh = new THREE.Mesh(geometry, material)
         mesh.castShadow = true
         mesh.userData.modelId = model.id
+        mesh.userData.faceAdjacency = buildFaceAdjacency(geometry)
         applyTransform(mesh, model.transform)
         mesh.updateMatrixWorld(true)
         const size = new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3())
@@ -397,8 +451,10 @@ export function ModelViewer({ files, models, bedX = 256, bedY = 256, bedShape = 
       renderer.domElement.removeEventListener('pointermove', onPointerMove)
       renderer.domElement.removeEventListener('pointerup', onPointerUp)
       renderer.domElement.style.cursor = 'auto'
-      highlightGeometry.dispose()
-      ;(highlightMesh.material as THREE.Material).dispose()
+      patchGeometry.dispose()
+      cursorGeometry.dispose()
+      highlightMat.dispose()
+      ;(cursorMesh.material as THREE.Material).dispose()
       cancelAnimationFrame(animId)
       resizeObs.disconnect()
       controls.dispose()

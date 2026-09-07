@@ -905,6 +905,9 @@ export default function App() {
                   onExport3mf={export3mf}
                   filamentSlotLabels={slotLabels}
                   onAssignExtruder={assignExtruder}
+                  pickTargetId={pickTarget}
+                  onPickFace={handlePickFace}
+                  onBounds={setModelSizes}
                 />
               ))}
             </div>

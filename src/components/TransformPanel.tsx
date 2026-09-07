@@ -68,7 +68,7 @@ export function TransformPanel({
     <div className="space-y-2">
       <div className="flex items-center gap-2 text-xs text-slate-500">
         <span>Snap</span>
-        {[0, 5, 15, 45].map((deg) => (
+        {[0, 5, 10, 15, 45].map((deg) => (
           <button
             key={deg}
             type="button"

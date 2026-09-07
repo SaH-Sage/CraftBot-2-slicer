@@ -31,6 +31,17 @@ rotasjonsverdien som ±90°-knappene bruker, så det som vises er nøyaktig det
 som skjæres. «Free rotate» og «Place on face» kan ikke være aktive samtidig —
 å slå på den ene skrur av den andre.
 
+## Snap-streker på rotasjonsringene
+
+Ringene i «Free rotate» har nå streker rundt seg som markerer hvor rotasjonen
+låser seg fast — lange streker hver 90°, middels hver 45°, korte ved hvert
+steg av valgt snap-verdi (5/10/15/45°). Bytter du snap-verdi oppdateres
+strekene med det samme. Slår du av snap («Av») forsvinner strekene helt,
+siden det da ikke er noe fast å vise. Strekene er bygget som en del av selve
+ringene (samme skalering, samme oppførsel når du holder musa over en akse),
+ikke en løsrevet tegning oppå — de treffer nøyaktig samme radius og plan som
+selve ringen, verifisert mot bibliotekets egen geometri.
+
 ## Orienteringshjelp (view helper)
 
 Øverst til høyre i 3D-visningen sitter en liten X/Y/Z-indikator som viser hvilken

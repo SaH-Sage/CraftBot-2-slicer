@@ -5,6 +5,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import { ViewHelper } from 'three/addons/helpers/ViewHelper.js'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import { buildFaceAdjacency, floodFillCoplanar, type FaceAdjacency } from '../lib/face-highlight'
+import { buildAxisTickGeometry, createAxisTickLines } from '../lib/rotate-gizmo-ticks'
 import { isWebGLAvailable } from '../lib/webgl'
 import type { ObjectTransform } from '../types'
 
@@ -217,7 +218,30 @@ export function ModelViewer({
     const rotateGizmo = new TransformControls(camera, renderer.domElement)
     rotateGizmo.setMode('rotate')
     rotateGizmo.setSpace('world') // matches plate-tools.ts's rotateAboutWorldAxis / the +-90 buttons
-    scene.add(rotateGizmo.getHelper())
+    const rotateHelper = rotateGizmo.getHelper()
+    scene.add(rotateHelper)
+
+    // Snap-degree tick marks on each ring. Reached only through public
+    // Object3D APIs (getHelper()'s children + the documented
+    // isTransformControlsGizmo flag) plus TransformControlsGizmo's own
+    // publicly typed .gizmo.rotate group — no underscore-prefixed internals.
+    // Added as siblings of the library's own X/Y/Z ring meshes, named to
+    // match them, so TransformControlsGizmo's own per-frame update sweeps
+    // these up too: same screen-space scaling, same show/hide and highlight-
+    // on-hover behaviour the rings already get, for free.
+    const gizmoObj = rotateHelper.children.find((c) => (c as { isTransformControlsGizmo?: boolean }).isTransformControlsGizmo) as
+      | (THREE.Object3D & { gizmo: { rotate: THREE.Object3D } })
+      | undefined
+    const rotateRingGroup = gizmoObj?.gizmo.rotate
+    const tickColors: Record<'X' | 'Y' | 'Z', number> = { X: 0xff2060, Y: 0x20e070, Z: 0x2090ff }
+    const tickLines =
+      rotateRingGroup &&
+      (['X', 'Y', 'Z'] as const).map((axis) => {
+        const lines = createAxisTickLines(axis, 0, tickColors[axis])
+        rotateRingGroup.add(lines)
+        return lines
+      })
+    let tickSnapDeg = 0
     let attachedRotateId: string | null = null
     rotateGizmo.addEventListener('dragging-changed', (event) => {
       // Exactly the same one-owner-per-frame handoff as the ViewHelper snap
@@ -508,8 +532,15 @@ export function ModelViewer({
         else rotateGizmo.detach()
         attachedRotateId = target ? wantRotateId : null
       }
-      const snapDeg = pickRef.current.rotationSnapDeg
+      const snapDeg = pickRef.current.rotationSnapDeg ?? 0
       rotateGizmo.setRotationSnap(snapDeg ? THREE.MathUtils.degToRad(snapDeg) : null)
+      if (tickLines && snapDeg !== tickSnapDeg) {
+        for (const lines of tickLines) {
+          lines.geometry.dispose()
+          lines.geometry = buildAxisTickGeometry(lines.name as 'X' | 'Y' | 'Z', snapDeg)
+        }
+        tickSnapDeg = snapDeg
+      }
       // Exactly one of these may touch the camera on a given frame: OrbitControls
       // re-derives its own state from the camera's current position/rotation on
       // every call, so handing back to it the moment the gizmo's snap-animation
@@ -545,6 +576,7 @@ export function ModelViewer({
       resizeObs.disconnect()
       controls.dispose()
       viewHelper.dispose()
+      if (tickLines) for (const lines of tickLines) { lines.geometry.dispose(); (lines.material as THREE.Material).dispose() }
       rotateGizmo.dispose()
       renderer.dispose()
       for (const mesh of meshes) mesh.geometry.dispose()

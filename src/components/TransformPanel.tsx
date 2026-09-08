@@ -135,10 +135,13 @@ export function TransformPanel({
                 type="button"
                 className={picking ? btnOn : btn}
                 disabled={disabled}
-                onClick={() => {
-                  onPickTarget(picking ? null : item.id)
-                  if (!picking) { onRotateTarget(null); onMoveTarget(null) }
-                }}
+                // A single call: onPickTarget is wired (in App.tsx) to a setter
+                // that already clears rotate/move atomically in one state
+                // update. Also calling onRotateTarget(null)/onMoveTarget(null)
+                // here would fire three separate updates to the same
+                // underlying state and the last one would win, undoing
+                // whichever mode this click just turned on.
+                onClick={() => onPickTarget(picking ? null : item.id)}
                 title="Click a face in the 3D view; that face becomes the bottom"
               >
                 Place on face
@@ -147,10 +150,7 @@ export function TransformPanel({
                 type="button"
                 className={rotating ? btnOn : btn}
                 disabled={disabled}
-                onClick={() => {
-                  onRotateTarget(rotating ? null : item.id)
-                  if (!rotating) { onPickTarget(null); onMoveTarget(null) }
-                }}
+                onClick={() => onRotateTarget(rotating ? null : item.id)}
                 title="Drag the rings in the 3D view to spin the model freely, snapped to the chosen step"
               >
                 Free rotate
@@ -159,10 +159,7 @@ export function TransformPanel({
                 type="button"
                 className={moving ? btnOn : btn}
                 disabled={disabled}
-                onClick={() => {
-                  onMoveTarget(moving ? null : item.id)
-                  if (!moving) { onPickTarget(null); onRotateTarget(null) }
-                }}
+                onClick={() => onMoveTarget(moving ? null : item.id)}
                 title="Drag the arrows or the square handle in the 3D view to slide the model across the bed"
               >
                 Move

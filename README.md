@@ -92,13 +92,18 @@ frihånd. Vanlig dra-for-å-rotere andre steder i visningen virker som før.
 
 ## Snarveier for Free rotate og Move, rett i visningen
 
-Nederst til venstre i 3D-visningen ligger nå to knapper, «Free rotate» og
-«Move», som virker på den (eneste) modellen på platen — de er en snarvei til
-akkurat de samme knappene i panelet lenger ned, ikke noe eget. Kun én av
-Place on face / Free rotate / Move kan være aktiv om gangen, uansett hvor du
-skrur den på. Knappene er alltid synlige (også på den tomme platen før noen
-fil er lastet inn) — de er bare grået ut og uklikkbare til det finnes en
-modell å rotere eller flytte.
+Nederst til venstre i 3D-visningen ligger nå tre knapper — «Place on face»,
+«Free rotate» og «Move» — som virker på den (eneste) modellen på platen. De er
+en snarvei til akkurat de samme knappene i panelet lenger ned, ikke noe eget.
+Kun én av de tre kan være aktiv om gangen, uansett hvor du skrur den på.
+Knappene er alltid synlige (også på den tomme platen før noen fil er lastet
+inn) — de er bare grået ut og uklikkbare til det finnes en modell.
+
+**Rettet:** knappene i panelet lenger ned sluttet å virke i en tidligere
+runde — hvert klikk ba om tre separate tilstandsoppdateringer for å slå på
+én modus og skru av de to andre, og siden alle tre gikk gjennom den samme
+delte tilstanden, vant den siste oppdateringen og nullstilte alt igjen, hver
+gang. Hvert knappetrykk gjør nå bare ett kall, som skal.
 
 ## Move: flytt modellen for hånd
 

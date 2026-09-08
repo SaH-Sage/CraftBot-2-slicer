@@ -708,6 +708,21 @@ export function ModelViewer({
           <button
             type="button"
             disabled={previewModels.length === 0}
+            onClick={() => onSetInteractionMode(pickTargetId === previewModels[0].id ? null : 'pick', previewModels[0].id)}
+            title={previewModels.length === 0 ? 'Load a model first' : 'Click a face in the 3D view; that face becomes the bottom'}
+            className={
+              previewModels.length === 0
+                ? 'px-2 py-1 rounded-md text-slate-300 text-xs font-medium cursor-not-allowed'
+                : pickTargetId === previewModels[0].id
+                  ? 'px-2 py-1 rounded-md bg-orca-500 text-white text-xs font-medium'
+                  : 'px-2 py-1 rounded-md text-slate-600 text-xs font-medium hover:bg-slate-100'
+            }
+          >
+            Place on face
+          </button>
+          <button
+            type="button"
+            disabled={previewModels.length === 0}
             onClick={() => onSetInteractionMode(rotateTargetId === previewModels[0].id ? null : 'rotate', previewModels[0].id)}
             title={previewModels.length === 0 ? 'Load a model first' : 'Drag the rings to spin the model freely, snapped to the chosen step'}
             className={

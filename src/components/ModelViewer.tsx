@@ -9,6 +9,18 @@ import { buildAxisTickGeometry, createAxisTickLines } from '../lib/rotate-gizmo-
 import { isWebGLAvailable } from '../lib/webgl'
 import type { ObjectTransform } from '../types'
 
+/**
+ * Camera position/target survives across tabs, not just across one
+ * instance's own re-renders. The Model, Settings, and Slice tabs each mount
+ * their own separate ModelViewer instance — a plain useRef would only
+ * remember the view within a single instance's lifetime, so switching tabs
+ * (or opening the result card, which mounts its own fresh viewer) would
+ * still reset the camera even though a transform commit alone would not.
+ * Keyed by the same model-set+bed key used below, so different plates don't
+ * share a view that makes no sense for them.
+ */
+const sharedCameraMemory = new Map<string, { position: THREE.Vector3; target: THREE.Vector3 }>()
+
 export interface ModelPreview {
   id: string
   file: File
@@ -139,12 +151,6 @@ export function ModelViewer({
   onRotateEnd,
 }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
-  // Survives effect re-runs (unlike anything declared inside the effect) so a
-  // transform commit — rotate, place-on-face, scale — that rebuilds the scene
-  // can put the camera back where the person left it, instead of recomputing
-  // a fresh "fit everything" shot every time. Reset only when the actual set
-  // of models or the bed changes, since those genuinely call for a re-fit.
-  const cameraMemory = useRef<{ key: string; position: THREE.Vector3; target: THREE.Vector3 } | null>(null)
   // Read through a ref so toggling pick/rotate mode does not rebuild the scene.
   const pickRef = useRef({ pickTargetId, onPickFace, onBounds, rotateTargetId, rotationSnapDeg, onRotateEnd })
   pickRef.current = { pickTargetId, onPickFace, onBounds, rotateTargetId, rotationSnapDeg, onRotateEnd }
@@ -266,6 +272,7 @@ export function ModelViewer({
     const orbitGizmo = new TransformControls(camera, renderer.domElement)
     orbitGizmo.setMode('rotate')
     orbitGizmo.setSpace('world')
+    orbitGizmo.setSize(1.4) // a bit larger than the default 1 — it has no model geometry competing for attention
     const orbitHelper = orbitGizmo.getHelper()
     scene.add(orbitHelper)
     const orbitGizmoObj = orbitHelper.children.find((c) => (c as { isTransformControlsGizmo?: boolean }).isTransformControlsGizmo) as
@@ -556,8 +563,8 @@ export function ModelViewer({
       // check every such commit would silently reset the view — restoring
       // is what makes a commit feel like "the object moved", not "the
       // camera did". Only actually re-fit when the model set or bed changed.
-      const remembered = cameraMemory.current
-      if (remembered && remembered.key === cameraMemoryKey) {
+      const remembered = sharedCameraMemory.get(cameraMemoryKey)
+      if (remembered) {
         camera.position.copy(remembered.position)
         controls.target.copy(remembered.target)
       } else {
@@ -646,7 +653,7 @@ export function ModelViewer({
     resizeObs.observe(el)
 
     return () => {
-      cameraMemory.current = { key: cameraMemoryKey, position: camera.position.clone(), target: controls.target.clone() }
+      sharedCameraMemory.set(cameraMemoryKey, { position: camera.position.clone(), target: controls.target.clone() })
       cancelled = true
       renderer.domElement.removeEventListener('pointerdown', onPointerDown)
       renderer.domElement.removeEventListener('pointermove', onPointerMove)

@@ -90,6 +90,24 @@ denne gangen rundt punktet kameraet svinger om, ikke rundt modellen. Dra i en
 ring for å svinge *visningen* i faste steg (5/10/15/45°) i stedet for
 frihånd. Vanlig dra-for-å-rotere andre steder i visningen virker som før.
 
+## Innstillinger: enkelt som standard, avansert bak en knapp
+
+Innstillinger-fanen viser nå bare det en elev faktisk trenger å velge:
+materiale, kvalitetsprofil, fyllprosent og støtte på/av. Alt annet — lag-
+høyde, veggtall, hastigheter, brim/raft/skirt, sømplassering og mer — ligger
+bak «Show advanced settings»-knappen, akkurat som Speed og Seam & Surface
+alltid har gjort.
+
+Dyse-diameter, maks byggehøyde og temperaturene (dyse/seng) vises fortsatt,
+men er grået ut og kan ikke endres — de følger printeren og det valgte
+materialet, ikke noe en elev skal justere for hånd. Bytter du materiale,
+følger riktig temperatur automatisk med fra Craftbot sin egen profil.
+
+Testet direkte: rendret panelet og sjekket maskinelt at alle avanserte felt
+er helt fraværende (ikke bare CSS-skjult) i standardvisningen, at de fire
+grunnleggende valgene forblir fullt redigerbare, og at printer/dyse/
+temperatur-feltene er synlige men reelt deaktiverte.
+
 ## Snarveier for Free rotate og Move, rett i visningen
 
 Nederst til venstre i 3D-visningen ligger nå tre knapper — «Place on face»,

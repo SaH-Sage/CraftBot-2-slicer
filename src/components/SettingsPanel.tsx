@@ -85,12 +85,19 @@ function useOverride(field?: ConfigField) {
 // Controls that are present while the panel is in its default (non-advanced)
 // state. The summary uses this list to keep a reset action reachable even when
 // an overridden control is currently hidden behind a toggle or the advanced
-// section.
+// section. nozzle_diameter/printable_height/nozzle_temperature/bed_temperature
+// are rendered (disabled) rather than hidden — fixed by the machine and the
+// chosen material, not something to hand-tune, but worth being able to see.
 const BASIC_SETTING_FIELDS: ConfigField[] = [
   'nozzle_diameter',
   'printable_height',
   'nozzle_temperature',
   'bed_temperature',
+  'sparse_infill_density',
+  'enable_support',
+]
+
+const ADVANCED_SETTING_FIELDS: ConfigField[] = [
   'layer_height',
   'adaptive_layer_height',
   'wall_loops',
@@ -98,17 +105,12 @@ const BASIC_SETTING_FIELDS: ConfigField[] = [
   'top_shell_layers',
   'bottom_shell_layers',
   'wall_generator',
-  'sparse_infill_density',
   'sparse_infill_pattern',
-  'enable_support',
   'brim_width',
   'brim_type',
   'raft_layers',
   'skirt_loops',
   'skirt_distance',
-]
-
-const ADVANCED_SETTING_FIELDS: ConfigField[] = [
   'default_speed',
   'outer_wall_speed',
   'initial_layer_speed',
@@ -262,14 +264,14 @@ export function SettingsPanel({
       visibleOverrideFields.add(field)
     }
   }
-  if (config.enable_support) visibleOverrideFields.add('support_type')
+  if (config.enable_support && showAdvanced) visibleOverrideFields.add('support_type')
   // The prime tower defaults on for a multi-slot config (see #163); an explicit
   // toggle still wins. Drives both the control's rendered state and which of its
   // override markers count as visible.
   const primeTowerOn = config.enable_prime_tower ?? PRIME_TOWER_DEFAULT_ENABLED
   // The prime-tower controls only render for a multi-slot config (see the
   // Filament section); the width sub-field only while the tower is on.
-  if (selectedFilaments.length > 1) {
+  if (showAdvanced && selectedFilaments.length > 1) {
     visibleOverrideFields.add('enable_prime_tower')
     if (primeTowerOn) visibleOverrideFields.add('prime_tower_width')
     // The mixed-temperature override (#164) renders in the same multi-slot
@@ -555,6 +557,8 @@ export function SettingsPanel({
           <SelectField
             label="Printer"
             value={importedPrinterLabel ?? selectedPrinter}
+            disabled
+            title="This school's slicer is set up for one printer"
             options={
               importedPrinterLabel
                 ? [...Object.keys(PRINTER_PRESETS), importedPrinterLabel]
@@ -571,6 +575,8 @@ export function SettingsPanel({
               min={0.1}
               max={1.2}
               step={0.05}
+              disabled
+              title="Fixed by the printer's actual hardware"
               onChange={(v) => onChange({ nozzle_diameter: v })}
             />
           </div>
@@ -583,6 +589,8 @@ export function SettingsPanel({
               min={1}
               max={1000}
               step={1}
+              disabled
+              title="Fixed by the printer's actual hardware"
               onChange={(v) => onChange({ printable_height: v })}
             />
           </div>
@@ -647,7 +655,7 @@ export function SettingsPanel({
                 Material is set by the imported {activeImport.name}. Remove the import (× above) to choose a preset.
               </p>
             )}
-          {selectedFilaments.length < MAX_FILAMENT_SLOTS && (
+          {showAdvanced && selectedFilaments.length < MAX_FILAMENT_SLOTS && (
             <button
               type="button"
               onClick={() => onFilamentsChange([...selectedFilaments, nextSlotMaterial(selectedFilaments)])}
@@ -657,7 +665,7 @@ export function SettingsPanel({
               + Add filament slot
             </button>
           )}
-          {selectedFilaments.length > 1 && (
+          {showAdvanced && selectedFilaments.length > 1 && (
             <>
               <p className="mt-2 text-xs text-slate-400">
                 Assign objects to slots on the Slice tab. Multiple slots make each plate slice a multi-material print.
@@ -718,6 +726,8 @@ export function SettingsPanel({
               min={150}
               max={350}
               step={5}
+              disabled
+              title="Set by the chosen material's profile"
               onChange={(v) => onChange({ nozzle_temperature: v })}
             />
             <NumberField
@@ -728,6 +738,8 @@ export function SettingsPanel({
               min={0}
               max={150}
               step={5}
+              disabled
+              title="Set by the chosen material's profile"
               onChange={(v) => onChange({ bed_temperature: v })}
             />
           </div>
@@ -754,129 +766,133 @@ export function SettingsPanel({
             ))}
           </div>
 
-          <div className="grid grid-cols-2 gap-3 mt-3">
-            <NumberField
-              label="Layer height"
-              field="layer_height"
-              unit="mm"
-              value={config.layer_height ?? DISPLAY_DEFAULTS.layer_height}
-              min={0.05}
-              max={0.5}
-              step={0.05}
-              onChange={(v) => onChange({ layer_height: v })}
-            />
-            <NumberField
-              label="Walls"
-              field="wall_loops"
-              unit="loops"
-              value={config.wall_loops ?? DISPLAY_DEFAULTS.wall_loops}
-              min={1}
-              max={10}
-              step={1}
-              onChange={(v) => onChange({ wall_loops: v })}
-            />
-          </div>
-          <div className="grid grid-cols-3 gap-3 mt-3">
-            <NumberField
-              label="First layer height"
-              field="initial_layer_print_height"
-              unit="mm"
-              value={
-                config.initial_layer_print_height ?? config.layer_height ?? DISPLAY_DEFAULTS.initial_layer_print_height
-              }
-              min={0.05}
-              max={0.5}
-              step={0.05}
-              onChange={(v) => onChange({ initial_layer_print_height: v })}
-            />
-            <NumberField
-              label="Top shells"
-              field="top_shell_layers"
-              unit="layers"
-              value={config.top_shell_layers ?? DISPLAY_DEFAULTS.top_shell_layers}
-              min={0}
-              max={20}
-              step={1}
-              onChange={(v) => onChange({ top_shell_layers: v })}
-            />
-            <NumberField
-              label="Bottom shells"
-              field="bottom_shell_layers"
-              unit="layers"
-              value={config.bottom_shell_layers ?? DISPLAY_DEFAULTS.bottom_shell_layers}
-              min={0}
-              max={20}
-              step={1}
-              onChange={(v) => onChange({ bottom_shell_layers: v })}
-            />
-          </div>
-          <SelectField
-            label="Wall generator"
-            field="wall_generator"
-            value={config.wall_generator ?? DISPLAY_DEFAULTS.wall_generator}
-            options={['arachne', 'classic'] as WallGenerator[]}
-            onChange={(v) => onChange({ wall_generator: v as WallGenerator })}
-            className="mt-3"
-          />
-          <p className="mt-1.5 text-xs text-slate-400 px-2">
-            Arachne gives better wall quality but can take much longer (even minutes) on models with lots of small, thin
-            features. Switch to Classic if a slice seems stuck.
-          </p>
-
-          {/* Variable (adaptive) layer height (#138) — the engine varies layer
-              thickness across Z from the model's geometry, so the quality
-              sub-slider only means anything once the toggle is on. */}
-          <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
-            <ToggleField
-              label="Variable layer height"
-              field="adaptive_layer_height"
-              value={config.adaptive_layer_height ?? false}
-              onChange={(v) => onChange({ adaptive_layer_height: v })}
-            />
-            {config.adaptive_layer_height && (
-              <div className="mt-3">
-                {/* A range input has no border to tint, so the override marker
-                    rides on the label — same treatment as the infill slider. */}
-                <div className="flex items-center justify-between gap-1 mb-1">
-                  {/* "Quality / Speed" verbatim from desktop OrcaSlicer's own
-                      adaptive slider — the value is a tradeoff axis, not a
-                      "more is better" quality score (0 = finest, 1 = fastest),
-                      so a plain "Quality" label would read backwards. */}
-                  <label
-                    htmlFor={adaptiveQualityId}
-                    className={clsx(
-                      'block text-xs font-medium',
-                      adaptiveQualityOverride.overridden ? 'text-amber-700' : 'text-slate-600',
-                    )}
-                  >
-                    Quality / Speed:{' '}
-                    {(config.adaptive_layer_height_quality ?? DISPLAY_DEFAULTS.adaptive_layer_height_quality).toFixed(
-                      2,
-                    )}
-                  </label>
-                  {adaptiveQualityOverride.revertButton}
-                </div>
-                <input
-                  id={adaptiveQualityId}
-                  data-testid="setting-adaptive_layer_height_quality"
-                  type="range"
-                  min={0}
-                  max={1}
+          {showAdvanced && (
+            <>
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <NumberField
+                  label="Layer height"
+                  field="layer_height"
+                  unit="mm"
+                  value={config.layer_height ?? DISPLAY_DEFAULTS.layer_height}
+                  min={0.05}
+                  max={0.5}
                   step={0.05}
-                  value={config.adaptive_layer_height_quality ?? DISPLAY_DEFAULTS.adaptive_layer_height_quality}
-                  onChange={(e) => onChange({ adaptive_layer_height_quality: Number(e.target.value) })}
-                  className={clsx(
-                    'w-full',
-                    adaptiveQualityOverride.overridden ? 'accent-amber-500' : 'accent-orca-500',
-                  )}
+                  onChange={(v) => onChange({ layer_height: v })}
                 />
-                <p className="mt-1 text-xs text-slate-400">
-                  Lower = finer detail (thinner layers, slower); higher = faster (thicker layers). Layer thickness stays
-                  within the printer's min/max layer height.
-                </p>
+                <NumberField
+                  label="Walls"
+                  field="wall_loops"
+                  unit="loops"
+                  value={config.wall_loops ?? DISPLAY_DEFAULTS.wall_loops}
+                  min={1}
+                  max={10}
+                  step={1}
+                  onChange={(v) => onChange({ wall_loops: v })}
+                />
               </div>
-            )}
-          </div>
+              <div className="grid grid-cols-3 gap-3 mt-3">
+                <NumberField
+                  label="First layer height"
+                  field="initial_layer_print_height"
+                  unit="mm"
+                  value={
+                    config.initial_layer_print_height ?? config.layer_height ?? DISPLAY_DEFAULTS.initial_layer_print_height
+                  }
+                  min={0.05}
+                  max={0.5}
+                  step={0.05}
+                  onChange={(v) => onChange({ initial_layer_print_height: v })}
+                />
+                <NumberField
+                  label="Top shells"
+                  field="top_shell_layers"
+                  unit="layers"
+                  value={config.top_shell_layers ?? DISPLAY_DEFAULTS.top_shell_layers}
+                  min={0}
+                  max={20}
+                  step={1}
+                  onChange={(v) => onChange({ top_shell_layers: v })}
+                />
+                <NumberField
+                  label="Bottom shells"
+                  field="bottom_shell_layers"
+                  unit="layers"
+                  value={config.bottom_shell_layers ?? DISPLAY_DEFAULTS.bottom_shell_layers}
+                  min={0}
+                  max={20}
+                  step={1}
+                  onChange={(v) => onChange({ bottom_shell_layers: v })}
+                />
+              </div>
+              <SelectField
+                label="Wall generator"
+                field="wall_generator"
+                value={config.wall_generator ?? DISPLAY_DEFAULTS.wall_generator}
+                options={['arachne', 'classic'] as WallGenerator[]}
+                onChange={(v) => onChange({ wall_generator: v as WallGenerator })}
+                className="mt-3"
+              />
+              <p className="mt-1.5 text-xs text-slate-400 px-2">
+                Arachne gives better wall quality but can take much longer (even minutes) on models with lots of small,
+                thin features. Switch to Classic if a slice seems stuck.
+              </p>
+
+              {/* Variable (adaptive) layer height (#138) — the engine varies layer
+                  thickness across Z from the model's geometry, so the quality
+                  sub-slider only means anything once the toggle is on. */}
+              <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+                <ToggleField
+                  label="Variable layer height"
+                  field="adaptive_layer_height"
+                  value={config.adaptive_layer_height ?? false}
+                  onChange={(v) => onChange({ adaptive_layer_height: v })}
+                />
+                {config.adaptive_layer_height && (
+                  <div className="mt-3">
+                    {/* A range input has no border to tint, so the override marker
+                        rides on the label — same treatment as the infill slider. */}
+                    <div className="flex items-center justify-between gap-1 mb-1">
+                      {/* "Quality / Speed" verbatim from desktop OrcaSlicer's own
+                          adaptive slider — the value is a tradeoff axis, not a
+                          "more is better" quality score (0 = finest, 1 = fastest),
+                          so a plain "Quality" label would read backwards. */}
+                      <label
+                        htmlFor={adaptiveQualityId}
+                        className={clsx(
+                          'block text-xs font-medium',
+                          adaptiveQualityOverride.overridden ? 'text-amber-700' : 'text-slate-600',
+                        )}
+                      >
+                        Quality / Speed:{' '}
+                        {(config.adaptive_layer_height_quality ?? DISPLAY_DEFAULTS.adaptive_layer_height_quality).toFixed(
+                          2,
+                        )}
+                      </label>
+                      {adaptiveQualityOverride.revertButton}
+                    </div>
+                    <input
+                      id={adaptiveQualityId}
+                      data-testid="setting-adaptive_layer_height_quality"
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={config.adaptive_layer_height_quality ?? DISPLAY_DEFAULTS.adaptive_layer_height_quality}
+                      onChange={(e) => onChange({ adaptive_layer_height_quality: Number(e.target.value) })}
+                      className={clsx(
+                        'w-full',
+                        adaptiveQualityOverride.overridden ? 'accent-amber-500' : 'accent-orca-500',
+                      )}
+                    />
+                    <p className="mt-1 text-xs text-slate-400">
+                      Lower = finer detail (thinner layers, slower); higher = faster (thicker layers). Layer thickness
+                      stays within the printer's min/max layer height.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </Section>
 
         {/* Infill */}
@@ -909,25 +925,27 @@ export function SettingsPanel({
               />
             </div>
           </div>
-          <SelectField
-            label="Pattern"
-            field="sparse_infill_pattern"
-            value={config.sparse_infill_pattern ?? DISPLAY_DEFAULTS.sparse_infill_pattern}
-            options={
-              [
-                'grid',
-                'gyroid',
-                'honeycomb',
-                'triangles',
-                'cubic',
-                'lightning',
-                'rectilinear',
-                'crosshatch',
-              ] as InfillPattern[]
-            }
-            onChange={(v) => onChange({ sparse_infill_pattern: v as InfillPattern })}
-            className="mt-3"
-          />
+          {showAdvanced && (
+            <SelectField
+              label="Pattern"
+              field="sparse_infill_pattern"
+              value={config.sparse_infill_pattern ?? DISPLAY_DEFAULTS.sparse_infill_pattern}
+              options={
+                [
+                  'grid',
+                  'gyroid',
+                  'honeycomb',
+                  'triangles',
+                  'cubic',
+                  'lightning',
+                  'rectilinear',
+                  'crosshatch',
+                ] as InfillPattern[]
+              }
+              onChange={(v) => onChange({ sparse_infill_pattern: v as InfillPattern })}
+              className="mt-3"
+            />
+          )}
         </Section>
 
         {/* Supports */}
@@ -938,7 +956,7 @@ export function SettingsPanel({
             value={config.enable_support ?? DISPLAY_DEFAULTS.enable_support}
             onChange={(v) => onChange({ enable_support: v })}
           />
-          {config.enable_support && (
+          {config.enable_support && showAdvanced && (
             <>
               <SelectField
                 label="Support type"
@@ -981,57 +999,61 @@ export function SettingsPanel({
               </p>
             </>
           )}
-          <div className="grid grid-cols-2 gap-3 mt-3">
-            <NumberField
-              label="Brim width"
-              field="brim_width"
-              unit="mm"
-              value={config.brim_width ?? DISPLAY_DEFAULTS.brim_width}
-              min={0}
-              max={30}
-              step={1}
-              onChange={(v) => onChange({ brim_width: v })}
-            />
-            <SelectField
-              label="Brim type"
-              field="brim_type"
-              value={config.brim_type ?? DISPLAY_DEFAULTS.brim_type}
-              options={['auto_brim', 'no_brim', 'outer_only', 'inner_only', 'outer_and_inner'] as BrimType[]}
-              onChange={(v) => onChange({ brim_type: v as BrimType })}
-            />
-          </div>
-          <div className="grid grid-cols-3 gap-3 mt-3">
-            <NumberField
-              label="Raft layers"
-              field="raft_layers"
-              unit="layers"
-              value={config.raft_layers ?? DISPLAY_DEFAULTS.raft_layers}
-              min={0}
-              max={100}
-              step={1}
-              onChange={(v) => onChange({ raft_layers: v })}
-            />
-            <NumberField
-              label="Skirt loops"
-              field="skirt_loops"
-              unit="loops"
-              value={config.skirt_loops ?? DISPLAY_DEFAULTS.skirt_loops}
-              min={0}
-              max={10}
-              step={1}
-              onChange={(v) => onChange({ skirt_loops: v })}
-            />
-            <NumberField
-              label="Skirt distance"
-              field="skirt_distance"
-              unit="mm"
-              value={config.skirt_distance ?? DISPLAY_DEFAULTS.skirt_distance}
-              min={0}
-              max={60}
-              step={1}
-              onChange={(v) => onChange({ skirt_distance: v })}
-            />
-          </div>
+          {showAdvanced && (
+            <>
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <NumberField
+                  label="Brim width"
+                  field="brim_width"
+                  unit="mm"
+                  value={config.brim_width ?? DISPLAY_DEFAULTS.brim_width}
+                  min={0}
+                  max={30}
+                  step={1}
+                  onChange={(v) => onChange({ brim_width: v })}
+                />
+                <SelectField
+                  label="Brim type"
+                  field="brim_type"
+                  value={config.brim_type ?? DISPLAY_DEFAULTS.brim_type}
+                  options={['auto_brim', 'no_brim', 'outer_only', 'inner_only', 'outer_and_inner'] as BrimType[]}
+                  onChange={(v) => onChange({ brim_type: v as BrimType })}
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-3 mt-3">
+                <NumberField
+                  label="Raft layers"
+                  field="raft_layers"
+                  unit="layers"
+                  value={config.raft_layers ?? DISPLAY_DEFAULTS.raft_layers}
+                  min={0}
+                  max={100}
+                  step={1}
+                  onChange={(v) => onChange({ raft_layers: v })}
+                />
+                <NumberField
+                  label="Skirt loops"
+                  field="skirt_loops"
+                  unit="loops"
+                  value={config.skirt_loops ?? DISPLAY_DEFAULTS.skirt_loops}
+                  min={0}
+                  max={10}
+                  step={1}
+                  onChange={(v) => onChange({ skirt_loops: v })}
+                />
+                <NumberField
+                  label="Skirt distance"
+                  field="skirt_distance"
+                  unit="mm"
+                  value={config.skirt_distance ?? DISPLAY_DEFAULTS.skirt_distance}
+                  min={0}
+                  max={60}
+                  step={1}
+                  onChange={(v) => onChange({ skirt_distance: v })}
+                />
+              </div>
+            </>
+          )}
         </Section>
 
         {/* Advanced toggle */}
@@ -1232,6 +1254,8 @@ function NumberField({
   max,
   step,
   onChange,
+  disabled,
+  title,
 }: {
   label: string
   field?: ConfigField
@@ -1241,6 +1265,8 @@ function NumberField({
   max: number
   step: number
   onChange: (v: number) => void
+  disabled?: boolean
+  title?: string
 }) {
   // Buffer keystrokes locally and only clamp/commit on blur (or Enter).
   // Clamping on every keystroke made the field impossible to type into:
@@ -1314,13 +1340,16 @@ function NumberField({
           min={min}
           max={max}
           step={step}
+          disabled={disabled}
+          title={title}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={(e) => commit(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
           }}
           className={clsx(
-            'w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-orca-400',
+            'w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orca-400',
+            disabled ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-800',
             inputClass,
           )}
         />

@@ -194,6 +194,9 @@ export function QueueItemCard({
   rotateTargetId,
   rotationSnapDeg,
   onRotateEnd,
+  moveTargetId,
+  onMoveEnd,
+  onSetInteractionMode,
 }: {
   item: QueueItem
   onExport3mf: (item: QueueItem) => Promise<ArrayBuffer>
@@ -203,16 +206,19 @@ export function QueueItemCard({
    *  component the prop shadows that import, which is what should be read. */
   filamentSlotLabels?: string[]
   onAssignExtruder?: (id: string, extruderId: number) => void
-  /** Passed straight through to this card's ModelViewer so "Place on face" and
-   *  "Free rotate", started from the Model or Settings tab, still work here —
-   *  the model panel that opens automatically after a slice is often the one
-   *  actually on screen when someone reaches for either. */
+  /** Passed straight through to this card's ModelViewer so "Place on face",
+   *  "Free rotate" and "Move", started from the Model or Settings tab, still
+   *  work here — the model panel that opens automatically after a slice is
+   *  often the one actually on screen when someone reaches for any of them. */
   pickTargetId?: string | null
   onPickFace?: (id: string, normal: [number, number, number]) => void
   onBounds?: (sizes: Record<string, [number, number, number]>) => void
   rotateTargetId?: string | null
   rotationSnapDeg?: number
   onRotateEnd?: (id: string, rotation: [number, number, number]) => void
+  moveTargetId?: string | null
+  onMoveEnd?: (id: string, offset: [number, number]) => void
+  onSetInteractionMode?: (mode: 'pick' | 'rotate' | 'move' | null, id: string | null) => void
 } & BedProps) {
   const [expanded, setExpanded] = useState(false)
   const [exporting3mf, setExporting3mf] = useState(false)
@@ -420,6 +426,9 @@ export function QueueItemCard({
                     rotateTargetId={rotateTargetId}
                     rotationSnapDeg={rotationSnapDeg}
                     onRotateEnd={onRotateEnd}
+                    moveTargetId={moveTargetId}
+                    onMoveEnd={onMoveEnd}
+                    onSetInteractionMode={onSetInteractionMode}
                   />
                 </ViewerErrorBoundary>
               </div>

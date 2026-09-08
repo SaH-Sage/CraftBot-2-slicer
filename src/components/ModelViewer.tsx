@@ -55,6 +55,16 @@ interface Props {
    *  drag: committing to React state on every frame would rebuild this whole WebGL scene
    *  (and the gizmo along with it) mid-gesture, since ObjectTransform flows back in as a prop. */
   onRotateEnd?: (id: string, rotation: [number, number, number]) => void
+  /** Model id currently attached to the move (translate) gizmo, or null/undefined. */
+  moveTargetId?: string | null
+  /** Fired once a move-gizmo drag finishes, with the model's resulting X/Y position in mm
+   *  (bed-relative, matching ObjectTransform.offset's convention directly — the mesh's own
+   *  position already lives in that space). Not continuous, for the same reason as onRotateEnd. */
+  onMoveEnd?: (id: string, offset: [number, number]) => void
+  /** Lets this component's own quick-toggle buttons (bottom-left overlay) drive the same
+   *  pick/rotate/move state that TransformPanel's per-model buttons do, so either can be used
+   *  interchangeably and turning one on always turns the other two off. */
+  onSetInteractionMode?: (mode: 'pick' | 'rotate' | 'move' | null, id: string | null) => void
 }
 
 function buildBed(scene: THREE.Scene, bedX: number, bedY: number, bedShape: 'rectangle' | 'circle'): THREE.Object3D[] {
@@ -149,11 +159,14 @@ export function ModelViewer({
   rotateTargetId,
   rotationSnapDeg,
   onRotateEnd,
+  moveTargetId,
+  onMoveEnd,
+  onSetInteractionMode,
 }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
-  // Read through a ref so toggling pick/rotate mode does not rebuild the scene.
-  const pickRef = useRef({ pickTargetId, onPickFace, onBounds, rotateTargetId, rotationSnapDeg, onRotateEnd })
-  pickRef.current = { pickTargetId, onPickFace, onBounds, rotateTargetId, rotationSnapDeg, onRotateEnd }
+  // Read through a ref so toggling pick/rotate/move mode does not rebuild the scene.
+  const pickRef = useRef({ pickTargetId, onPickFace, onBounds, rotateTargetId, rotationSnapDeg, onRotateEnd, moveTargetId, onMoveEnd })
+  pickRef.current = { pickTargetId, onPickFace, onBounds, rotateTargetId, rotationSnapDeg, onRotateEnd, moveTargetId, onMoveEnd }
   // Blocking: nothing could be drawn, so the overlay covering the canvas is
   // the whole content. Distinct from `notice` below, which annotates a
   // preview that did render and so must not hide it.
@@ -173,8 +186,14 @@ export function ModelViewer({
     setLoadError(null)
     setNotice(null)
 
-    const w = el.clientWidth
-    const h = el.clientHeight
+    // Falls back to the viewer's own target aspect (1080x810 = 4:3) rather
+    // than trusting clientWidth/Height to already be settled — on the very
+    // first paint, especially now that this mounts before any file exists,
+    // the container can still be mid-layout, and 0/0 here would hand three.js
+    // a NaN aspect ratio and a dead canvas. The ResizeObserver below corrects
+    // to the real size within a frame regardless; this only covers that gap.
+    const w = el.clientWidth || 1080
+    const h = el.clientHeight || 810
 
     const scene = new THREE.Scene()
     scene.background = new THREE.Color(0xf8fafc)
@@ -289,6 +308,29 @@ export function ModelViewer({
       }
     })
 
+    // Move gizmo: slides the attached mesh across the bed. World space (not
+    // local) keeps the arrows aligned with the bed's own X/Y regardless of
+    // whatever rotation the object currently has — "move along bed X" should
+    // mean the same thing before and after a Free Rotate. Z, and the two
+    // Z-involving plane handles, are hidden outright: lifting a print off the
+    // bed isn't a placement this app supports, so the gizmo simply doesn't
+    // offer it, rather than allowing a drag whose result would be discarded.
+    const moveGizmo = new TransformControls(camera, renderer.domElement)
+    moveGizmo.setMode('translate')
+    moveGizmo.setSpace('world')
+    moveGizmo.showZ = false
+    moveGizmo.showYZ = false
+    moveGizmo.showXZ = false
+    scene.add(moveGizmo.getHelper())
+    let attachedMoveId: string | null = null
+    moveGizmo.addEventListener('dragging-changed', (event) => {
+      controls.enabled = !event.value
+      if (event.value === false && attachedMoveId && pickRef.current.onMoveEnd) {
+        const p = moveGizmo.object!.position
+        pickRef.current.onMoveEnd(attachedMoveId, [p.x, p.y])
+      }
+    })
+
     // Face picking (place-on-face). A click, not a drag, so orbiting still works.
     // A highlight overlay shows which face is under the cursor before the click commits it.
     const raycaster = new THREE.Raycaster()
@@ -390,7 +432,7 @@ export function ModelViewer({
       downAt = { x: e.clientX, y: e.clientY }
     }
     const onPointerMove = (e: PointerEvent) => {
-      if (rotateGizmo.dragging || !pickRef.current.pickTargetId) {
+      if (rotateGizmo.dragging || moveGizmo.dragging || !pickRef.current.pickTargetId) {
         if (patchMesh.visible || cursorMesh.visible) {
           patchMesh.visible = false
           cursorMesh.visible = false
@@ -415,7 +457,7 @@ export function ModelViewer({
       // or face picking — both read a specific point, and a drag's end point is
       // incidental, not a choice.
       const wasClick = !!start && Math.hypot(e.clientX - start.x, e.clientY - start.y) <= 4
-      if (rotateGizmo.dragging) return
+      if (rotateGizmo.dragging || moveGizmo.dragging) return
       if (wasClick && viewHelper.handleClick(e)) return
       if (!wasClick || !pickRef.current.pickTargetId || !pickRef.current.onPickFace) return
       const hit = raycastAt(e.clientX, e.clientY)
@@ -588,6 +630,14 @@ export function ModelViewer({
         tickSnapDeg = snapDeg
       }
 
+      const wantMoveId = pickRef.current.moveTargetId ?? null
+      if (wantMoveId !== attachedMoveId) {
+        const target = wantMoveId ? meshes.find((m) => m.userData.modelId === wantMoveId) : undefined
+        if (target) moveGizmo.attach(target)
+        else moveGizmo.detach()
+        attachedMoveId = target ? wantMoveId : null
+      }
+
       // Exactly one of these may touch the camera on a given frame: OrbitControls
       // re-derives its own state from the camera's current position/rotation on
       // every call, so handing back to it the moment the gizmo's snap-animation
@@ -606,6 +656,7 @@ export function ModelViewer({
     const resizeObs = new ResizeObserver(() => {
       const nw = el.clientWidth
       const nh = el.clientHeight
+      if (nw === 0 || nh === 0) return // mid-layout transient — next callback will have real numbers
       camera.aspect = nw / nh
       camera.updateProjectionMatrix()
       renderer.setSize(nw, nh)
@@ -629,6 +680,7 @@ export function ModelViewer({
       viewHelper.dispose()
       if (tickLines) for (const lines of tickLines) { lines.geometry.dispose(); (lines.material as THREE.Material).dispose() }
       rotateGizmo.dispose()
+      moveGizmo.dispose()
       renderer.dispose()
       for (const mesh of meshes) mesh.geometry.dispose()
       material.dispose()
@@ -651,6 +703,34 @@ export function ModelViewer({
   return (
     <div className="relative w-full h-full min-h-48">
       <div ref={mountRef} className="w-full h-full rounded-xl overflow-hidden" style={{ touchAction: 'none' }} />
+      {!loadError && onSetInteractionMode && previewModels.length > 0 && (
+        <div className="absolute left-2 bottom-9 flex items-center gap-1 rounded-lg bg-white/90 border border-slate-200 px-1.5 py-1 shadow-sm">
+          <button
+            type="button"
+            onClick={() => onSetInteractionMode(rotateTargetId === previewModels[0].id ? null : 'rotate', previewModels[0].id)}
+            title="Drag the rings to spin the model freely, snapped to the chosen step"
+            className={
+              rotateTargetId === previewModels[0].id
+                ? 'px-2 py-1 rounded-md bg-orca-500 text-white text-xs font-medium'
+                : 'px-2 py-1 rounded-md text-slate-600 text-xs font-medium hover:bg-slate-100'
+            }
+          >
+            Free rotate
+          </button>
+          <button
+            type="button"
+            onClick={() => onSetInteractionMode(moveTargetId === previewModels[0].id ? null : 'move', previewModels[0].id)}
+            title="Drag the arrows or the square handle to slide the model across the bed"
+            className={
+              moveTargetId === previewModels[0].id
+                ? 'px-2 py-1 rounded-md bg-orca-500 text-white text-xs font-medium'
+                : 'px-2 py-1 rounded-md text-slate-600 text-xs font-medium hover:bg-slate-100'
+            }
+          >
+            Move
+          </button>
+        </div>
+      )}
       {loadError && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-50/80 text-sm text-slate-500">
           {loadError}

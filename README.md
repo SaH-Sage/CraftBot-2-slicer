@@ -90,6 +90,22 @@ denne gangen rundt punktet kameraet svinger om, ikke rundt modellen. Dra i en
 ring for å svinge *visningen* i faste steg (5/10/15/45°) i stedet for
 frihånd. Vanlig dra-for-å-rotere andre steder i visningen virker som før.
 
+## Snarveier for Free rotate og Move, rett i visningen
+
+Nederst til venstre i 3D-visningen ligger nå to knapper, «Free rotate» og
+«Move», som virker på den (eneste) modellen på platen — de er en snarvei til
+akkurat de samme knappene i panelet lenger ned, ikke noe eget. Kun én av
+Place on face / Free rotate / Move kan være aktiv om gangen, uansett hvor du
+skrur den på.
+
+## Move: flytt modellen for hånd
+
+En ny knapp, «Move», legger piler og en firkantet hake på modellen — dra i
+den firkantede haken for å flytte fritt i X og Y, eller i en pil for å
+flytte langs bare én akse. Z er låst helt ute (ikke bare skjult): modellen
+kan ikke løftes av platen. Verifisert direkte mot biblioteket: Z endres
+aldri under en dra-operasjon, og aksen for løft er umulig å treffe.
+
 ## Orbit snap er fjernet
 
 Kameraets egen «Orbit snap»-knapp er tatt bort igjen — den viste seg for

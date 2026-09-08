@@ -26,11 +26,15 @@ interface Props {
   pickTarget: string | null
   onPickTarget: (id: string | null) => void
   /** Model currently attached to the free-rotate gizmo, or null. Mutually
-   *  exclusive with pickTarget — activating one clears the other. */
+   *  exclusive with pickTarget and moveTarget — activating one clears the
+   *  other two. */
   rotateTarget: string | null
   onRotateTarget: (id: string | null) => void
   rotationSnapDeg: number
   onRotationSnapDeg: (deg: number) => void
+  /** Model currently attached to the move (translate) gizmo, or null. */
+  moveTarget: string | null
+  onMoveTarget: (id: string | null) => void
   onApply: (updates: { id: string; transform: ObjectTransform }[]) => void
   onAddFile: (file: File) => void
   disabled?: boolean
@@ -51,6 +55,8 @@ export function TransformPanel({
   onRotateTarget,
   rotationSnapDeg,
   onRotationSnapDeg,
+  moveTarget,
+  onMoveTarget,
   onApply,
   onAddFile,
   disabled,
@@ -84,6 +90,7 @@ export function TransformPanel({
       {items.map((item) => {
         const picking = pickTarget === item.id
         const rotating = rotateTarget === item.id
+        const moving = moveTarget === item.id
         return (
           <div key={item.id} className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
@@ -130,7 +137,7 @@ export function TransformPanel({
                 disabled={disabled}
                 onClick={() => {
                   onPickTarget(picking ? null : item.id)
-                  if (!picking) onRotateTarget(null)
+                  if (!picking) { onRotateTarget(null); onMoveTarget(null) }
                 }}
                 title="Click a face in the 3D view; that face becomes the bottom"
               >
@@ -142,16 +149,31 @@ export function TransformPanel({
                 disabled={disabled}
                 onClick={() => {
                   onRotateTarget(rotating ? null : item.id)
-                  if (!rotating) onPickTarget(null)
+                  if (!rotating) { onPickTarget(null); onMoveTarget(null) }
                 }}
                 title="Drag the rings in the 3D view to spin the model freely, snapped to the chosen step"
               >
                 Free rotate
               </button>
+              <button
+                type="button"
+                className={moving ? btnOn : btn}
+                disabled={disabled}
+                onClick={() => {
+                  onMoveTarget(moving ? null : item.id)
+                  if (!moving) { onPickTarget(null); onRotateTarget(null) }
+                }}
+                title="Drag the arrows or the square handle in the 3D view to slide the model across the bed"
+              >
+                Move
+              </button>
             </div>
             {picking && <p className="text-xs text-orca-600">Klikk på flaten i 3D-visningen som skal ligge mot plata.</p>}
             {rotating && (
               <p className="text-xs text-orca-600">Dra i ringene i 3D-visningen for å rotere fritt.</p>
+            )}
+            {moving && (
+              <p className="text-xs text-orca-600">Dra i pilene eller den firkantede haken i 3D-visningen for å flytte modellen.</p>
             )}
 
             <div className="flex flex-wrap items-center gap-2">

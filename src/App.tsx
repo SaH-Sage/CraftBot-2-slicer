@@ -482,8 +482,17 @@ export default function App() {
   // transformed size of each model as the viewer measured it.
   const [pickTarget, setPickTarget] = useState<string | null>(null)
   const [rotateTarget, setRotateTarget] = useState<string | null>(null)
+  const [moveTarget, setMoveTarget] = useState<string | null>(null)
   const [rotationSnapDeg, setRotationSnapDeg] = useState(15)
   const [modelSizes, setModelSizes] = useState<Record<string, [number, number, number]>>({})
+  // Place-on-face, Free rotate, and Move are mutually exclusive — turning one
+  // on always turns the other two off, whether triggered from TransformPanel
+  // or from the quick-toggle buttons inside the 3D view itself.
+  const setInteractionMode = useCallback((mode: 'pick' | 'rotate' | 'move' | null, id: string | null) => {
+    setPickTarget(mode === 'pick' ? id : null)
+    setRotateTarget(mode === 'rotate' ? id : null)
+    setMoveTarget(mode === 'move' ? id : null)
+  }, [])
   const handlePickFace = useCallback(
     (id: string, normal: [number, number, number]) => {
       if (pickTarget !== null && id !== pickTarget) return
@@ -503,6 +512,18 @@ export default function App() {
     },
     [rotateTarget, queue, applyTransforms],
   )
+  const handleMoveEnd = useCallback(
+    (id: string, offset: [number, number]) => {
+      if (moveTarget !== null && id !== moveTarget) return
+      const item = queue.find((q) => q.id === id)
+      if (!item) return
+      // Unlike rotate/place-on-face (which reset offset to null, handing
+      // placement back to the grid/arrange logic), a manual move is the one
+      // case that should stick exactly where the person dragged it to.
+      applyTransforms([{ id, transform: { ...current(item.transform), offset } }])
+    },
+    [moveTarget, queue, applyTransforms],
+  )
   const transformItems = useMemo(
     () =>
       queue
@@ -515,9 +536,11 @@ export default function App() {
       items={transformItems}
       bed={{ x: bedX, y: bedY, z: bedZ }}
       pickTarget={pickTarget}
-      onPickTarget={setPickTarget}
+      onPickTarget={(id) => setInteractionMode(id === null ? null : 'pick', id)}
       rotateTarget={rotateTarget}
-      onRotateTarget={setRotateTarget}
+      onRotateTarget={(id) => setInteractionMode(id === null ? null : 'rotate', id)}
+      moveTarget={moveTarget}
+      onMoveTarget={(id) => setInteractionMode(id === null ? null : 'move', id)}
       rotationSnapDeg={rotationSnapDeg}
       onRotationSnapDeg={setRotationSnapDeg}
       onApply={applyTransforms}
@@ -793,6 +816,9 @@ export default function App() {
                     rotateTargetId={rotateTarget}
                     rotationSnapDeg={rotationSnapDeg}
                     onRotateEnd={handleRotateEnd}
+                    moveTargetId={moveTarget}
+                    onMoveEnd={handleMoveEnd}
+                    onSetInteractionMode={setInteractionMode}
                   />
                 </ViewerErrorBoundary>
               </div>
@@ -845,6 +871,9 @@ export default function App() {
                       rotateTargetId={rotateTarget}
                       rotationSnapDeg={rotationSnapDeg}
                       onRotateEnd={handleRotateEnd}
+                      moveTargetId={moveTarget}
+                      onMoveEnd={handleMoveEnd}
+                      onSetInteractionMode={setInteractionMode}
                     />
                   </ViewerErrorBoundary>
                 </div>
@@ -938,6 +967,9 @@ export default function App() {
                   rotateTargetId={rotateTarget}
                   rotationSnapDeg={rotationSnapDeg}
                   onRotateEnd={handleRotateEnd}
+                  moveTargetId={moveTarget}
+                  onMoveEnd={handleMoveEnd}
+                  onSetInteractionMode={setInteractionMode}
                 />
               ))}
             </div>

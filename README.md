@@ -21,7 +21,11 @@ materialprofilene (PLA, PETG, TPU) er Craftbot sine egne OrcaSlicer-profiler, he
 Jobben laster ned skjæremotoren (ca. 38 MB) fra OrcaWeb sine utgivelser og bygger siden. Ingenting
 kompileres. Hver `git push` til `master` publiserer på nytt.
 
-## Visningen er større
+## Visningen er 1080 × 810
+
+Sidens innhold er gjort bredere (fra 1024 til 1152 px) slik at
+3D-visningen faktisk får plass til sin fulle, faste størrelse på 1080 × 810,
+i stedet for å bli klemt av en smalere sideramme.
 
 3D-visningen i Modell- og Innstillinger-fanen er nå 1080 × 810 (4:3) på en
 stor skjerm, og krymper proporsjonalt på en mindre en, i stedet for en fast
@@ -44,6 +48,17 @@ og modellen hopper til nærmeste steg. Sluttresultatet legges inn i den samme
 rotasjonsverdien som ±90°-knappene bruker, så det som vises er nøyaktig det
 som skjæres. «Free rotate» og «Place on face» kan ikke være aktive samtidig —
 å slå på den ene skrur av den andre.
+
+## Ringene er større
+
+Rotasjonsringene (både «Free rotate» på modellen og «Orbit snap» på
+kameraet) er nå 50 % større enn standardstørrelsen.
+
+## Visningen lastes med det samme
+
+3D-visningen vises nå fra siden lastes — en tom plate, ikke en tom boks —
+i stedet for å dukke opp først når en STL-fil slippes inn. Sengens
+kamera-vinkel husker seg selv på samme måte som for modeller.
 
 ## Kameraet husker synsvinkelen på tvers av faner
 

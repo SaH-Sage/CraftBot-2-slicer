@@ -237,6 +237,7 @@ export function ModelViewer({
     const rotateGizmo = new TransformControls(camera, renderer.domElement)
     rotateGizmo.setMode('rotate')
     rotateGizmo.setSpace('world') // matches plate-tools.ts's rotateAboutWorldAxis / the +-90 buttons
+    rotateGizmo.setSize(1.5)
     const rotateHelper = rotateGizmo.getHelper()
     scene.add(rotateHelper)
 
@@ -492,6 +493,23 @@ export function ModelViewer({
       const failedCount = results.length - loaded.length
       if (loaded.length === 0) {
         setLoadError(failedCount > 0 ? 'Could not read this model file' : null)
+        // No files at all (e.g. the page has just loaded and nothing has been
+        // dropped in yet) isn't a failure — still give the empty bed a sane
+        // framing instead of leaving the camera at THREE's raw default.
+        if (previewModels.length === 0) {
+          const remembered = sharedCameraMemory.get(cameraMemoryKey)
+          if (remembered) {
+            camera.position.copy(remembered.position)
+            controls.target.copy(remembered.target)
+          } else {
+            const bedMaxDim = Math.max(bedX, bedY, 10)
+            const dist = (bedMaxDim * 0.5) / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 4)
+            const viewDir = new THREE.Vector3(0.6, -1, 0.7).normalize()
+            controls.target.set(0, 0, 0)
+            camera.position.copy(controls.target).addScaledVector(viewDir, dist)
+          }
+          controls.update()
+        }
         return
       }
       // Everything below this point renders, so any complaint has to be a

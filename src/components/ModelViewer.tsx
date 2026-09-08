@@ -703,28 +703,34 @@ export function ModelViewer({
   return (
     <div className="relative w-full h-full min-h-48">
       <div ref={mountRef} className="w-full h-full rounded-xl overflow-hidden" style={{ touchAction: 'none' }} />
-      {!loadError && onSetInteractionMode && previewModels.length > 0 && (
+      {!loadError && onSetInteractionMode && (
         <div className="absolute left-2 bottom-9 flex items-center gap-1 rounded-lg bg-white/90 border border-slate-200 px-1.5 py-1 shadow-sm">
           <button
             type="button"
+            disabled={previewModels.length === 0}
             onClick={() => onSetInteractionMode(rotateTargetId === previewModels[0].id ? null : 'rotate', previewModels[0].id)}
-            title="Drag the rings to spin the model freely, snapped to the chosen step"
+            title={previewModels.length === 0 ? 'Load a model first' : 'Drag the rings to spin the model freely, snapped to the chosen step'}
             className={
-              rotateTargetId === previewModels[0].id
-                ? 'px-2 py-1 rounded-md bg-orca-500 text-white text-xs font-medium'
-                : 'px-2 py-1 rounded-md text-slate-600 text-xs font-medium hover:bg-slate-100'
+              previewModels.length === 0
+                ? 'px-2 py-1 rounded-md text-slate-300 text-xs font-medium cursor-not-allowed'
+                : rotateTargetId === previewModels[0].id
+                  ? 'px-2 py-1 rounded-md bg-orca-500 text-white text-xs font-medium'
+                  : 'px-2 py-1 rounded-md text-slate-600 text-xs font-medium hover:bg-slate-100'
             }
           >
             Free rotate
           </button>
           <button
             type="button"
+            disabled={previewModels.length === 0}
             onClick={() => onSetInteractionMode(moveTargetId === previewModels[0].id ? null : 'move', previewModels[0].id)}
-            title="Drag the arrows or the square handle to slide the model across the bed"
+            title={previewModels.length === 0 ? 'Load a model first' : 'Drag the arrows or the square handle to slide the model across the bed'}
             className={
-              moveTargetId === previewModels[0].id
-                ? 'px-2 py-1 rounded-md bg-orca-500 text-white text-xs font-medium'
-                : 'px-2 py-1 rounded-md text-slate-600 text-xs font-medium hover:bg-slate-100'
+              previewModels.length === 0
+                ? 'px-2 py-1 rounded-md text-slate-300 text-xs font-medium cursor-not-allowed'
+                : moveTargetId === previewModels[0].id
+                  ? 'px-2 py-1 rounded-md bg-orca-500 text-white text-xs font-medium'
+                  : 'px-2 py-1 rounded-md text-slate-600 text-xs font-medium hover:bg-slate-100'
             }
           >
             Move

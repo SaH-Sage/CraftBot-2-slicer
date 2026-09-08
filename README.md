@@ -96,7 +96,9 @@ Nederst til venstre i 3D-visningen ligger nå to knapper, «Free rotate» og
 «Move», som virker på den (eneste) modellen på platen — de er en snarvei til
 akkurat de samme knappene i panelet lenger ned, ikke noe eget. Kun én av
 Place on face / Free rotate / Move kan være aktiv om gangen, uansett hvor du
-skrur den på.
+skrur den på. Knappene er alltid synlige (også på den tomme platen før noen
+fil er lastet inn) — de er bare grået ut og uklikkbare til det finnes en
+modell å rotere eller flytte.
 
 ## Move: flytt modellen for hånd
 

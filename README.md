@@ -21,7 +21,13 @@ materialprofilene (PLA, PETG, TPU) er Craftbot sine egne OrcaSlicer-profiler, he
 Jobben laster ned skjæremotoren (ca. 38 MB) fra OrcaWeb sine utgivelser og bygger siden. Ingenting
 kompileres. Hver `git push` til `master` publiserer på nytt.
 
-## Visningen er 1080 × 810
+## Visningen er 1080 × 810 (Modell-fanen)
+
+Modell-fanen (full bredde, ingen konkurrerende innhold) viser nå 3D-visningen
+i nøyaktig 1080 × 810. Innstillinger-fanen viser visningen ved siden av selve
+innstillingspanelet i to kolonner — der er det ikke plass til en fast
+1080 px bredde uten å ødelegge den layouten, så den bruker samme 4:3-form,
+skalert til kolonnens faktiske bredde.
 
 Sidens innhold er gjort bredere (fra 1024 til 1152 px) slik at
 3D-visningen faktisk får plass til sin fulle, faste størrelse på 1080 × 810,
@@ -60,6 +66,13 @@ kameraet) er nå 50 % større enn standardstørrelsen.
 i stedet for å dukke opp først når en STL-fil slippes inn. Sengens
 kamera-vinkel husker seg selv på samme måte som for modeller.
 
+## Visningen er der fra første stund
+
+3D-visningen vises nå med det samme siden lastes — en tom plate — i stedet
+for å vente på at en fil skal lastes inn. Kameraet er riktig plassert fra
+aller første bilde (ikke bare etter at en fil er ferdig lest), siden dette nå
+skjer synkront ved oppstart i stedet for å vente på en asynkron innlasting.
+
 ## Kameraet husker synsvinkelen på tvers av faner
 
 Modell-, Innstillinger- og Skjær-fanen har hver sin egen 3D-visning (de er
@@ -73,9 +86,15 @@ akkurat den vinkelen du forlot.
 
 Nede til venstre i 3D-visningen er det en «Orbit snap»-knapp. Slår du den på,
 dukker det opp tre ringer med de samme snap-strekene som i «Free rotate» —
-denne gangen rundt punktet kameraet svinger om, ikke rundt modellen. Ringene er også litt større enn på objekt-rotasjonen, siden de her ikke konkurrerer om plassen med selve modellen. Dra i en
+denne gangen rundt punktet kameraet svinger om, ikke rundt modellen. Dra i en
 ring for å svinge *visningen* i faste steg (5/10/15/45°) i stedet for
 frihånd. Vanlig dra-for-å-rotere andre steder i visningen virker som før.
+
+## Orbit snap er fjernet
+
+Kameraets egen «Orbit snap»-knapp er tatt bort igjen — den viste seg for
+upålitelig i bruk. «Free rotate» (rotere modellen, med samme snap-ringer)
+er upåvirket og fungerer som før, bare 50 % større.
 
 ## Snap-streker på rotasjonsringene
 

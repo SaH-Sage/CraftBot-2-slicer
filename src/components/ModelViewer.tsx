@@ -159,13 +159,6 @@ export function ModelViewer({
   // preview that did render and so must not hide it.
   const [loadError, setLoadError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  // Orbit-snap is a camera/view aid, not a per-model edit — unlike pick/rotate
-  // targets it never needs to leave this component, so it's plain local state
-  // rather than another prop threaded through App.tsx.
-  const [orbitSnapOn, setOrbitSnapOn] = useState(false)
-  const [orbitSnapDeg, setOrbitSnapDeg] = useState(15)
-  const orbitSnapRef = useRef({ orbitSnapOn, orbitSnapDeg })
-  orbitSnapRef.current = { orbitSnapOn, orbitSnapDeg }
   const fileModels = useMemo(() => files.map((file, index) => ({ id: `file-${index}`, file })), [files])
   const previewModels = models ?? fileModels
 
@@ -219,7 +212,28 @@ export function ModelViewer({
     controls.dampingFactor = 0.08
     controls.minDistance = 10
     controls.maxDistance = 5000
-    controls.target.set(0, 0, 0)
+
+    // Computed here (not just below, next to the STL loading) so the very
+    // first frame — before any file has even started parsing — already
+    // shows a sensible view: the remembered one if this exact plate has been
+    // seen before, otherwise the empty bed framed on its own size. Without
+    // this, the camera would sit at Three's raw (0,0,0) default until the
+    // loading promise resolves, which is what made the view feel like it
+    // only "existed" once a model came in.
+    const shown = previewModels.slice(0, MAX_PREVIEW_MODELS)
+    const cameraMemoryKey = `${shown.map((m) => m.id).sort().join(',')}|${bedX}|${bedY}|${bedShape}`
+    const remembered0 = sharedCameraMemory.get(cameraMemoryKey)
+    if (remembered0) {
+      camera.position.copy(remembered0.position)
+      controls.target.copy(remembered0.target)
+    } else {
+      const bedMaxDim = Math.max(bedX, bedY, 10)
+      const dist = (bedMaxDim * 0.5) / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 4)
+      const viewDir = new THREE.Vector3(0.6, -1, 0.7).normalize()
+      controls.target.set(0, 0, 0)
+      camera.position.copy(controls.target).addScaledVector(viewDir, dist)
+    }
+    controls.update()
 
     // Orientation gizmo (top-right): shows current camera orientation, click an
     // axis to snap the view to it. three.js's own widget — same one used in the
@@ -263,41 +277,6 @@ export function ModelViewer({
       })
     let tickSnapDeg = 0
 
-    // Orbit-snap: the same rotate gizmo + tick marks as above, but attached to
-    // an invisible anchor at the orbit target instead of a model, so dragging
-    // its rings swings the *camera* around the target in fixed steps, with
-    // the same visible snap ticks — the camera-side analogue of "Free rotate".
-    // Reuses the proven mechanism wholesale rather than a hand-rolled drag.
-    const orbitAnchor = new THREE.Object3D()
-    scene.add(orbitAnchor) // TransformControls requires its target be in the scene graph
-    const orbitGizmo = new TransformControls(camera, renderer.domElement)
-    orbitGizmo.setMode('rotate')
-    orbitGizmo.setSpace('world')
-    orbitGizmo.setSize(1.4) // a bit larger than the default 1 — it has no model geometry competing for attention
-    const orbitHelper = orbitGizmo.getHelper()
-    scene.add(orbitHelper)
-    const orbitGizmoObj = orbitHelper.children.find((c) => (c as { isTransformControlsGizmo?: boolean }).isTransformControlsGizmo) as
-      | (THREE.Object3D & { gizmo: { rotate: THREE.Object3D } })
-      | undefined
-    const orbitRingGroup = orbitGizmoObj?.gizmo.rotate
-    const orbitTickColors: Record<'X' | 'Y' | 'Z', number> = { X: 0xff2060, Y: 0x20e070, Z: 0x2090ff }
-    const orbitTickLines =
-      orbitRingGroup &&
-      (['X', 'Y', 'Z'] as const).map((axis) => {
-        const lines = createAxisTickLines(axis, orbitSnapRef.current.orbitSnapDeg, orbitTickColors[axis])
-        orbitRingGroup.add(lines)
-        return lines
-      })
-    let orbitTickSnapDeg = -1
-    let orbitAttached = false
-    let orbitOffsetStart = new THREE.Vector3()
-    orbitGizmo.addEventListener('dragging-changed', (event) => {
-      controls.enabled = !event.value
-      if (event.value === true) {
-        orbitOffsetStart = camera.position.clone().sub(controls.target)
-        orbitAnchor.quaternion.identity()
-      }
-    })
     let attachedRotateId: string | null = null
     rotateGizmo.addEventListener('dragging-changed', (event) => {
       // Exactly the same one-owner-per-frame handoff as the ViewHelper snap
@@ -463,8 +442,6 @@ export function ModelViewer({
     })
     let cancelled = false
 
-    const shown = previewModels.slice(0, MAX_PREVIEW_MODELS)
-    const cameraMemoryKey = `${shown.map((m) => m.id).sort().join(',')}|${bedX}|${bedY}|${bedShape}`
     const skippedCount = previewModels.length - shown.length
 
     void Promise.all(
@@ -493,23 +470,8 @@ export function ModelViewer({
       const failedCount = results.length - loaded.length
       if (loaded.length === 0) {
         setLoadError(failedCount > 0 ? 'Could not read this model file' : null)
-        // No files at all (e.g. the page has just loaded and nothing has been
-        // dropped in yet) isn't a failure — still give the empty bed a sane
-        // framing instead of leaving the camera at THREE's raw default.
-        if (previewModels.length === 0) {
-          const remembered = sharedCameraMemory.get(cameraMemoryKey)
-          if (remembered) {
-            camera.position.copy(remembered.position)
-            controls.target.copy(remembered.target)
-          } else {
-            const bedMaxDim = Math.max(bedX, bedY, 10)
-            const dist = (bedMaxDim * 0.5) / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 4)
-            const viewDir = new THREE.Vector3(0.6, -1, 0.7).normalize()
-            controls.target.set(0, 0, 0)
-            camera.position.copy(controls.target).addScaledVector(viewDir, dist)
-          }
-          controls.update()
-        }
+        // Camera framing for this case (no models at all) is already handled
+        // synchronously at effect setup, above — nothing further to do here.
         return
       }
       // Everything below this point renders, so any complaint has to be a
@@ -626,32 +588,12 @@ export function ModelViewer({
         tickSnapDeg = snapDeg
       }
 
-      orbitAnchor.position.copy(controls.target)
-      const wantOrbit = orbitSnapRef.current.orbitSnapOn
-      if (wantOrbit !== orbitAttached) {
-        if (wantOrbit) orbitGizmo.attach(orbitAnchor)
-        else orbitGizmo.detach()
-        orbitAttached = wantOrbit
-      }
-      const orbitDeg = orbitSnapRef.current.orbitSnapDeg
-      orbitGizmo.setRotationSnap(THREE.MathUtils.degToRad(orbitDeg))
-      if (orbitTickLines && orbitDeg !== orbitTickSnapDeg) {
-        for (const lines of orbitTickLines) {
-          lines.geometry.dispose()
-          lines.geometry = buildAxisTickGeometry(lines.name as 'X' | 'Y' | 'Z', orbitDeg)
-        }
-        orbitTickSnapDeg = orbitDeg
-      }
-
       // Exactly one of these may touch the camera on a given frame: OrbitControls
       // re-derives its own state from the camera's current position/rotation on
-      // every call, so handing back to it the moment either gizmo's interaction
-      // ends picks up cleanly with no fight or snap-back between them.
+      // every call, so handing back to it the moment the gizmo's snap-animation
+      // ends picks up cleanly with no fight or snap-back between the two.
       if (viewHelper.animating) {
         viewHelper.update(delta)
-      } else if (orbitGizmo.dragging) {
-        camera.position.copy(controls.target).add(orbitOffsetStart.clone().applyQuaternion(orbitAnchor.quaternion))
-        camera.lookAt(controls.target)
       } else {
         controls.update()
       }
@@ -687,8 +629,6 @@ export function ModelViewer({
       viewHelper.dispose()
       if (tickLines) for (const lines of tickLines) { lines.geometry.dispose(); (lines.material as THREE.Material).dispose() }
       rotateGizmo.dispose()
-      if (orbitTickLines) for (const lines of orbitTickLines) { lines.geometry.dispose(); (lines.material as THREE.Material).dispose() }
-      orbitGizmo.dispose()
       renderer.dispose()
       for (const mesh of meshes) mesh.geometry.dispose()
       material.dispose()
@@ -711,36 +651,6 @@ export function ModelViewer({
   return (
     <div className="relative w-full h-full min-h-48">
       <div ref={mountRef} className="w-full h-full rounded-xl overflow-hidden" style={{ touchAction: 'none' }} />
-      {!loadError && (
-        <div className="absolute left-2 bottom-9 flex items-center gap-1 rounded-lg bg-white/90 border border-slate-200 px-1.5 py-1 shadow-sm">
-          <button
-            type="button"
-            onClick={() => setOrbitSnapOn((v) => !v)}
-            title="Drag the rings to orbit the view in fixed steps, instead of freehand"
-            className={
-              orbitSnapOn
-                ? 'px-2 py-1 rounded-md bg-orca-500 text-white text-xs font-medium'
-                : 'px-2 py-1 rounded-md text-slate-600 text-xs font-medium hover:bg-slate-100'
-            }
-          >
-            Orbit snap
-          </button>
-          {orbitSnapOn && (
-            <select
-              value={orbitSnapDeg}
-              onChange={(e) => setOrbitSnapDeg(Number(e.target.value))}
-              className="text-xs border border-slate-200 rounded-md px-1 py-1 bg-white text-slate-600"
-              aria-label="Orbit snap increment"
-            >
-              {[5, 10, 15, 45].map((d) => (
-                <option key={d} value={d}>
-                  {d}°
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-      )}
       {loadError && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-50/80 text-sm text-slate-500">
           {loadError}

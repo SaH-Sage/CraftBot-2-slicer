@@ -831,7 +831,7 @@ export default function App() {
           <div className="grid sm:grid-cols-[1fr_1.4fr] gap-6">
             {previewModels.length > 0 && (
               <div className="space-y-3 order-last sm:order-first">
-                <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white mx-auto" style={{ width: 1080, height: 810, maxWidth: '100%' }}>
+                <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white" style={{ width: '100%', aspectRatio: '4 / 3' }}>
                   <ViewerErrorBoundary resetKey={previewFilesKey} message="3D preview unavailable">
                     <ModelViewer
                       files={previewFiles}

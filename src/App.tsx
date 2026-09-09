@@ -922,13 +922,42 @@ export default function App() {
                 onLoadUserPreset={loadUserPreset}
                 onDeleteUserPreset={deleteUserPreset}
               />
-              <button
-                type="button"
-                onClick={() => setActiveTab('slice')}
-                className="mt-6 w-full py-3 rounded-xl bg-orca-500 hover:bg-orca-600 text-white font-semibold transition-colors"
-              >
-                Ready to slice →
-              </button>
+              {(() => {
+                // Mirrors SliceHeader's own canSlice check — "ready" or "done
+                // but stale" is the same set that button treats as sliceable.
+                const sliceableCount = queue.filter(
+                  (i) => i.status === 'ready' || (i.status === 'done' && i.stale),
+                ).length
+                const canSliceNow = sliceableCount > 0 && !isSlicing && !plate.slicing && plateAction === null
+                return (
+                  <div className="mt-6 flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('slice')}
+                      className="flex-1 py-3 rounded-xl border border-orca-300 text-orca-600 hover:bg-orca-50 font-semibold transition-colors"
+                    >
+                      Ready to slice →
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveTab('slice')
+                        sliceAll()
+                      }}
+                      disabled={!canSliceNow}
+                      title="Go to the Slice tab and start slicing right away"
+                      className={clsx(
+                        'flex-1 py-3 rounded-xl font-semibold transition-colors',
+                        canSliceNow
+                          ? 'bg-orca-500 hover:bg-orca-600 text-white'
+                          : 'bg-slate-200 text-slate-400 cursor-not-allowed',
+                      )}
+                    >
+                      Slice
+                    </button>
+                  </div>
+                )
+              })()}
             </div>
           </div>
         )}

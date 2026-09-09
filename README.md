@@ -90,6 +90,14 @@ denne gangen rundt punktet kameraet svinger om, ikke rundt modellen. Dra i en
 ring for å svinge *visningen* i faste steg (5/10/15/45°) i stedet for
 frihånd. Vanlig dra-for-å-rotere andre steder i visningen virker som før.
 
+## To knapper nederst i Innstillinger
+
+«Ready to slice»-knappen er nå to knapper side ved side. «Ready to slice →»
+gjør akkurat som før — tar deg til Skjær-fanen, ingenting mer. Den nye
+«Slice»-knappen tar deg til samme fane og starter skjæringen med det samme,
+for den som bare vil ha resultatet uten et ekstra klikk. «Slice» er grået ut
+når det ikke er noe å skjære, eller en skjæring allerede pågår.
+
 ## Rettet: 3D-visningen og selve utskriften kunne peke ulik vei
 
 Etter å ha kombinert to rotasjoner på samme modell (f.eks. «Free rotate» og

@@ -1396,10 +1396,8 @@ function ToggleField({
           )}
         >
           <span
-            className={clsx(
-              'absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform',
-              value ? 'translate-x-5' : 'translate-x-0.5',
-            )}
+            className="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-[left] duration-150"
+            style={{ left: value ? 22 : 2 }}
           />
         </span>
       </button>

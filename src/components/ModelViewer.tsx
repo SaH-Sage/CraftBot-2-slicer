@@ -144,6 +144,13 @@ function applyTransform(mesh: THREE.Mesh, transform: ObjectTransform | undefined
     transform.scale[1] * transform.mirror[1],
     transform.scale[2] * transform.mirror[2],
   )
+  // 'ZYX', not three.js's default 'XYZ': matches plate-tools.ts's decomposition
+  // order, which in turn matches the slicing engine's own rotation convention
+  // (R = Rz*Ry*Rx, confirmed empirically against the real engine — see the
+  // comment on withRotation in plate-tools.ts). Setting .order here means every
+  // later read of mesh.rotation — including the rotate gizmo's own live drag,
+  // which writes mesh.quaternion directly — decomposes the same way too.
+  mesh.rotation.order = 'ZYX'
   mesh.rotation.set(transform.rotation[0], transform.rotation[1], transform.rotation[2])
 }
 

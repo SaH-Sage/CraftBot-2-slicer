@@ -90,6 +90,24 @@ denne gangen rundt punktet kameraet svinger om, ikke rundt modellen. Dra i en
 ring for å svinge *visningen* i faste steg (5/10/15/45°) i stedet for
 frihånd. Vanlig dra-for-å-rotere andre steder i visningen virker som før.
 
+## Rettet: 3D-visningen og selve utskriften kunne peke ulik vei
+
+Etter å ha kombinert to rotasjoner på samme modell (f.eks. «Free rotate» og
+deretter «Place on face», eller «Free rotate» to ganger på ulike akser) kunne
+det som faktisk ble skåret ende opp dreid feil i forhold til det 3D-visningen
+viste — så mye som 90°.
+
+Årsaken: selve skjæremotoren bygger en rotasjon fra de tre lagrede tallene i
+en litt annen rekkefølge enn det nettleser-forhåndsvisningen brukte som
+standard. For én enkelt rotasjon spiller ikke dette noen rolle — tallene blir
+identiske uansett rekkefølge — så alt så riktig ut helt til to rotasjoner ble
+kombinert. Bekreftet direkte: skar en tydelig asymmetrisk testboks gjennom
+den ekte motoren med en kjent, kombinert rotasjon, og sammenlignet den
+faktiske høyden mot begge mulige rekkefølger — motoren fulgte tydelig den
+ene, forhåndsvisningen den andre. Rettet slik at begge nå bruker samme
+rekkefølge, og lagt til en automatisk test som hadde fanget opp akkurat dette
+(bekreftet: testen feiler med den gamle rekkefølgen, består med den nye).
+
 ## Innstillinger: enkelt som standard, avansert bak en knapp
 
 Innstillinger-fanen viser nå bare det en elev faktisk trenger å velge:
@@ -107,6 +125,13 @@ Testet direkte: rendret panelet og sjekket maskinelt at alle avanserte felt
 er helt fraværende (ikke bare CSS-skjult) i standardvisningen, at de fire
 grunnleggende valgene forblir fullt redigerbare, og at printer/dyse/
 temperatur-feltene er synlige men reelt deaktiverte.
+
+## Rettet: av/på-bryteren i Innstillinger
+
+Prikken i «Enable supports»-bryteren (og alle andre av/på-brytere) satt feil
+plassert. Byttet til en enklere, mer universelt støttet måte å posisjonere
+den på. Bekreftet: av-tilstand ved 2px, på-tilstand ved 22px, begge innenfor
+bryterens grenser.
 
 ## Snarveier for Free rotate og Move, rett i visningen
 

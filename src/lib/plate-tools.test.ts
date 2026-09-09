@@ -3,12 +3,61 @@ import * as THREE from 'three'
 import { boxStl, cylinderStl, fitToBed, placeOnFace, rotateAboutWorldAxis, toggleMirror } from './plate-tools'
 import { identityObjectTransform } from './model-transforms'
 
+// 'ZYX', matching plate-tools.ts's own decomposition order — see the comment
+// on withRotation there for why this specific order matters: it's what the
+// slicing engine's own Transformation class uses to reconstruct a rotation
+// matrix from separate x/y/z angles (R = Rz*Ry*Rx), confirmed by slicing a
+// distinctly-sized test box through the real engine under a known combined
+// rotation and comparing its actual output dimensions against both
+// conventions. Three.js's default 'XYZ' only agrees with it for a
+// single-axis rotation, which is why isolated tests of one operation at a
+// time never caught this — every prior test here, and every prior
+// hand-check, happened to use just one axis.
 function worldNormal(t: ReturnType<typeof identityObjectTransform>, local: [number, number, number]) {
-  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(t.rotation[0], t.rotation[1], t.rotation[2], 'XYZ'))
+  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(t.rotation[0], t.rotation[1], t.rotation[2], 'ZYX'))
   return new THREE.Vector3(...local).applyQuaternion(q)
 }
 
+// Rebuilds a rotation matrix the same way the slicing engine does (R =
+// Rz*Ry*Rx applied to separate x/y/z angles), independent of worldNormal
+// above or of any three.js Euler order string — so this check can't pass by
+// having the same mistaken assumption on both sides of a comparison.
+function engineRotationMatrix(rotation: [number, number, number]): THREE.Matrix4 {
+  const rx = new THREE.Matrix4().makeRotationX(rotation[0])
+  const ry = new THREE.Matrix4().makeRotationY(rotation[1])
+  const rz = new THREE.Matrix4().makeRotationZ(rotation[2])
+  return rz.multiply(ry).multiply(rx)
+}
+
 describe('plate tools', () => {
+  it('composing rotations about two different world axes reconstructs correctly under the engine convention', () => {
+    // Exactly what "Free rotate about X" then "Free rotate about Z" (or Free
+    // rotate then Place on face) produces: a second world-axis rotation
+    // composed on top of a transform that already has one. A single-axis
+    // rotation can't expose an Euler-order mismatch — this needs two.
+    let t = rotateAboutWorldAxis(undefined, 'x', 90)
+    t = rotateAboutWorldAxis(t, 'z', 90)
+
+    // Confirm this test case actually exercises multiple axes at once —
+    // otherwise it would silently degrade into the same blind spot as the
+    // single-axis tests above.
+    const nonZeroAxes = t.rotation.filter((r) => Math.abs(r) > 1e-6).length
+    expect(nonZeroAxes).toBeGreaterThan(1)
+
+    // The intended orientation, independent of any stored/decomposed numbers:
+    // rotate 90° about world X, then 90° about world Z on top, composed directly
+    // as quaternions.
+    const intended = new THREE.Quaternion()
+      .setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2)
+      .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2))
+    const intendedMatrix = new THREE.Matrix4().makeRotationFromQuaternion(intended)
+
+    // What the engine will actually reconstruct from the stored numbers.
+    const engineMatrix = engineRotationMatrix(t.rotation)
+
+    for (let i = 0; i < 16; i++) expect(engineMatrix.elements[i]).toBeCloseTo(intendedMatrix.elements[i], 6)
+  })
+
   it('rotates about a world axis by the requested angle', () => {
     const t = rotateAboutWorldAxis(undefined, 'x', 90)
     // the +Z face normal should now point along -Y

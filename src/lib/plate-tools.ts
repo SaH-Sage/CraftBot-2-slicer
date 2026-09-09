@@ -17,11 +17,22 @@ const AXES: Record<Axis, THREE.Vector3> = {
 }
 
 function quaternionOf(t: ObjectTransform): THREE.Quaternion {
-  return new THREE.Quaternion().setFromEuler(new THREE.Euler(t.rotation[0], t.rotation[1], t.rotation[2], 'XYZ'))
+  // Matches withRotation's decomposition order below — must reconstruct with
+  // the same convention the stored numbers were produced under, or composing
+  // a second rotation on top of an existing one starts from the wrong quaternion.
+  return new THREE.Quaternion().setFromEuler(new THREE.Euler(t.rotation[0], t.rotation[1], t.rotation[2], 'ZYX'))
 }
 
 function withRotation(t: ObjectTransform, q: THREE.Quaternion): ObjectTransform {
-  const e = new THREE.Euler().setFromQuaternion(q, 'XYZ')
+  // 'ZYX', not three.js's default 'XYZ': the slicing engine reconstructs a
+  // rotation from these three numbers as R = Rz*Ry*Rx (confirmed by slicing
+  // a distinctly-sized test box through the real engine and comparing its
+  // actual output height against both conventions). The two conventions only
+  // agree for a single-axis rotation — exactly why an isolated Free Rotate or
+  // Place on Face looked correct, and only combining two of them (a second
+  // operation composing on top of a first that already has rotation) exposed
+  // a real mismatch between the preview and the sliced result.
+  const e = new THREE.Euler().setFromQuaternion(q, 'ZYX')
   const clean = (v: number) => (Math.abs(v) < 1e-9 ? 0 : v)
   return { ...t, rotation: [clean(e.x), clean(e.y), clean(e.z)], offset: null }
 }

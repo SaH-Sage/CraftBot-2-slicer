@@ -229,6 +229,17 @@ export interface QueueItem {
   conversion?: ConversionKind
   /** Last transform returned by an engine-side current-plate action. */
   transform?: ObjectTransform
+  /** The model id a support pillar was generated from by clicking a point on
+   *  it, or undefined for anything added independently (an upload, or a
+   *  primitive/pillar added via typed dimensions). Purely a UI grouping
+   *  hint — TransformPanel uses it to nest an "associated items" list under
+   *  the parent, collapsed to one line each until expanded. Deliberately not
+   *  load-bearing for anything else: it does not make the pillar follow the
+   *  parent's later transforms (see the comment on handlePillarPick in
+   *  App.tsx for why that's a real trade-off, not an oversight), and does
+   *  not cascade delete — an orphaned pillar (parent removed) simply shows
+   *  as its own top-level item again. */
+  parentId?: string
 }
 
 export interface SliceProgress {

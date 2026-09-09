@@ -557,7 +557,7 @@ export default function App() {
     [moveTarget, queue, applyTransforms],
   )
   const handlePillarPick = useCallback(
-    (point: [number, number, number]) => {
+    (point: [number, number, number], parentId: string) => {
       const height = point[2]
       if (height < 1) return // clicked too close to the bed — not worth a pillar
       const stl = supportPillarStl(pillarBaseD, pillarTopD, height)
@@ -568,7 +568,13 @@ export default function App() {
       )
       // offset, not null: this pillar's entire point is standing exactly
       // under the clicked spot, not wherever the grid layout would put it.
-      addFiles([file], [{ ...identityObjectTransform(), offset: [point[0], point[1]] }])
+      // parentId is a UI grouping hint only (see the comment on QueueItem.parentId)
+      // — it does not make this pillar track the parent's later transforms.
+      // If reorienting the parent leaves a pillar standing in the wrong spot,
+      // that's the trade-off of a manual, physical support: the person who
+      // placed it can see that and delete it, same as they'd do with any
+      // hand-placed support in a real slicer.
+      addFiles([file], [{ transform: { ...identityObjectTransform(), offset: [point[0], point[1]] }, parentId }])
     },
     [pillarBaseD, pillarTopD, addFiles],
   )
@@ -576,7 +582,13 @@ export default function App() {
     () =>
       queue
         .filter((item) => item.stlFile)
-        .map((item) => ({ id: item.id, name: item.sourceFile.name, transform: item.transform, size: modelSizes[item.id] })),
+        .map((item) => ({
+          id: item.id,
+          name: item.sourceFile.name,
+          transform: item.transform,
+          size: modelSizes[item.id],
+          parentId: item.parentId,
+        })),
     [queue, modelSizes],
   )
   const transformPanel = (
@@ -599,6 +611,7 @@ export default function App() {
       onTogglePillarPick={togglePillarPick}
       onApply={applyTransforms}
       onAddFile={(file) => addFiles([file])}
+      onRemoveItem={removeItem}
       disabled={plateAction !== null}
     />
   )

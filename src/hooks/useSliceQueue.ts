@@ -405,7 +405,7 @@ export interface SliceQueue {
    *  value until the worker resolves the live one from engine-version.json. */
   engineLabel: string
   isSlicing: boolean
-  addFiles: (files: File[], initialTransforms?: (ObjectTransform | undefined)[]) => void
+  addFiles: (files: File[], options?: ({ transform?: ObjectTransform; parentId?: string } | undefined)[]) => void
   removeItem: (id: string) => void
   /** Slice every ready item (and re-slice stale results) one after another. */
   sliceAll: () => void
@@ -795,9 +795,10 @@ export function useSliceQueue(
   )
 
   const addFiles = useCallback(
-    (files: File[], initialTransforms?: (ObjectTransform | undefined)[]) => {
+    (files: File[], options?: ({ transform?: ObjectTransform; parentId?: string } | undefined)[]) => {
       const newItems: QueueItem[] = files.map((f, i) => {
         const conversion = classifyConversion(f.name)
+        const opt = options?.[i]
         return {
           id: crypto.randomUUID(),
           name: f.name,
@@ -810,9 +811,11 @@ export function useSliceQueue(
           status: 'converting',
           conversion,
           // addFiles's id is generated right here, with no way for a caller
-          // to learn it in time for a follow-up applyTransforms — a pillar
-          // dropped at a clicked point needs its position set at creation.
-          ...(initialTransforms?.[i] ? { transform: initialTransforms[i] } : {}),
+          // to learn it in time for a follow-up applyTransforms/patch — a
+          // pillar dropped at a clicked point needs its position (and which
+          // model it was generated from) set at creation.
+          ...(opt?.transform ? { transform: opt.transform } : {}),
+          ...(opt?.parentId ? { parentId: opt.parentId } : {}),
         }
       })
       dispatch({ type: 'ADD_ITEMS', items: newItems })

@@ -90,6 +90,41 @@ denne gangen rundt punktet kameraet svinger om, ikke rundt modellen. Dra i en
 ring for å svinge *visningen* i faste steg (5/10/15/45°) i stedet for
 frihånd. Vanlig dra-for-å-rotere andre steder i visningen virker som før.
 
+## Pilarer grupperes under modellen de ble laget fra
+
+En pilar laget med «Klikk og plasser» vises nå ikke lenger som sitt eget,
+løsrevne element i lista — den grupperes under modellen du klikket på, som
+et «tilknyttet element». Som standard vises hvert tilknyttet element som én
+kompakt linje (navn, mål, en ×-knapp for å fjerne den); klikk linja for å
+utvide til akkurat de samme kontrollene (Place on face, Free rotate, Move,
+Scale, Mirror, Reset) som et element øverst i lista har. Fjernes
+hovedmodellen, dukker en tilhørende pilar opp igjen som sitt eget element —
+den forsvinner aldri.
+
+Med vilje **ikke** bygget: at pilaren følger med når hovedmodellen roteres
+etterpå. Vris hovedmodellen til en vinkel som gjør en pilar ubrukelig, og det
+er et bevisst valg — fjern den manuelt med ×-knappen, akkurat som med en
+hvilken som helst hånd-plassert støtte i en vanlig slicer.
+
+Bygget om ett hakk enklere enn første forsøk: det var i utgangspunktet et
+eget vis/skjul-nivå for *hele* gruppen med tilknyttede elementer, men det
+matchet ikke ordlyden din («når lista er kollapset skal den vise én linje per
+element») — fjernet det ekstra nivået, så lista med tilknyttede elementer
+vises alltid, med bare det ene per-element nivået av utvid/kollaps igjen.
+Fanget også en grammatikk-feil («tilknyttetede» i stedet for «tilknyttede»)
+ved faktisk å rendre komponenten og sjekke teksten, ikke bare lese koden.
+
+## Gulvet er gjennomsiktig nedenfra
+
+Platen (det grå gulvet) blokkerte synet når kameraet var under platen — nyttig
+noen ganger med «Place on face», siden det er lettere å treffe riktig vinkel
+med kameraet der. Gulvflaten vises nå bare fra oven (der den fortsatt ser ut
+som en vanlig, ugjennomsiktig plate); sett nedenfra kulles den bort
+helt, mens rutenettet og kantlinjen (som ikke har en «side» å kulle) forblir
+synlige. Bekreftet direkte: sendte en stråle ned mot platen ovenfra (traff,
+som forventet) og en stråle opp mot den nedenfra (traff ikke, som forventet)
+— for både rektangulær og rund plate.
+
 ## Klikk og plasser: pilar direkte fra et punkt på modellen
 
 Ny knapp, «Klikk og plasser», ved siden av mål-feltene for støttepilaren. Slå

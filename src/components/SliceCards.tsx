@@ -227,7 +227,7 @@ export function QueueItemCard({
   selectedModelId?: string | null
   onSelectModel?: (id: string) => void
   pillarPickOn?: boolean
-  onPillarPick?: (point: [number, number, number]) => void
+  onPillarPick?: (point: [number, number, number], parentId: string) => void
   onTogglePillarPick?: () => void
 } & BedProps) {
   const [expanded, setExpanded] = useState(false)

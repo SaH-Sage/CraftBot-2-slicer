@@ -75,8 +75,9 @@ interface Props {
   pillarPickOn?: boolean
   /** Fired with the world-space (x, y, z) of a click on any model's surface while
    *  pillarPickOn is active — z is the pillar's required height, since it always
-   *  stands on the bed at z=0. */
-  onPillarPick?: (point: [number, number, number]) => void
+   *  stands on the bed at z=0 — plus which model was actually clicked, for grouping
+   *  the resulting pillar under it in TransformPanel's associated-items list. */
+  onPillarPick?: (point: [number, number, number], parentId: string) => void
   /** Toggles pillarPickOn — wired to the "Add pillar" quick-toggle button in the view. */
   onTogglePillarPick?: () => void
 }
@@ -89,7 +90,13 @@ function buildBed(scene: THREE.Scene, bedX: number, bedY: number, bedShape: 'rec
 
     // CircleGeometry is in XY plane by default — correct for Z-up
     const bedGeo = new THREE.CircleGeometry(radius, 64)
-    const bedMat = new THREE.MeshPhongMaterial({ color: 0xe2e8f0, side: THREE.DoubleSide })
+    // FrontSide (not DoubleSide): the fill should block the view from above (where it reads as a normal opaque
+    // build plate) but not from below — Place on face sometimes needs the camera down there to get the
+    // right angle on a click, and an opaque floor in the way defeats that. Both PlaneGeometry and
+    // CircleGeometry here have their front face normal pointing +Z (confirmed directly, not assumed), so
+    // this culls exactly the back (underside) face, leaving the grid and border — both line-based, with no
+    // "side" to cull — visible from below on their own.
+    const bedMat = new THREE.MeshPhongMaterial({ color: 0xe2e8f0, side: THREE.FrontSide })
     const bed = new THREE.Mesh(bedGeo, bedMat)
     bed.receiveShadow = true
     scene.add(bed)
@@ -117,7 +124,13 @@ function buildBed(scene: THREE.Scene, bedX: number, bedY: number, bedShape: 'rec
   } else {
     // PlaneGeometry is in XY plane by default — correct for Z-up
     const bedGeo = new THREE.PlaneGeometry(bedX, bedY)
-    const bedMat = new THREE.MeshPhongMaterial({ color: 0xe2e8f0, side: THREE.DoubleSide })
+    // FrontSide (not DoubleSide): the fill should block the view from above (where it reads as a normal opaque
+    // build plate) but not from below — Place on face sometimes needs the camera down there to get the
+    // right angle on a click, and an opaque floor in the way defeats that. Both PlaneGeometry and
+    // CircleGeometry here have their front face normal pointing +Z (confirmed directly, not assumed), so
+    // this culls exactly the back (underside) face, leaving the grid and border — both line-based, with no
+    // "side" to cull — visible from below on their own.
+    const bedMat = new THREE.MeshPhongMaterial({ color: 0xe2e8f0, side: THREE.FrontSide })
     const bed = new THREE.Mesh(bedGeo, bedMat)
     bed.receiveShadow = true
     scene.add(bed)
@@ -549,7 +562,10 @@ export function ModelViewer({
 
       if (pickRef.current.pillarPickOn) {
         const hit = raycastAny(e.clientX, e.clientY)
-        if (hit && pickRef.current.onPillarPick) pickRef.current.onPillarPick([hit.point.x, hit.point.y, hit.point.z])
+        const parentId = hit ? ((hit.object as THREE.Mesh).userData.modelId as string | undefined) : undefined
+        if (hit && parentId && pickRef.current.onPillarPick) {
+          pickRef.current.onPillarPick([hit.point.x, hit.point.y, hit.point.z], parentId)
+        }
         return
       }
 

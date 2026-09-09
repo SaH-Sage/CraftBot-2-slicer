@@ -111,7 +111,7 @@ export function TransformPanel({
   // call rotateAboutWorldAxis/setUniformScale/toggleMirror/fitToBed directly,
   // not through App.tsx's handleRotateEnd/handlePickFace.
   const applyKeepingPillarPosition = (item: TransformItem, t: ObjectTransform) =>
-    apply(item.id, keepingAssociatedItemPosition(item, t))
+    apply(item.id, keepingAssociatedItemPosition(item, t, items.some((i) => i.parentId === item.id)))
   const rotate = (item: TransformItem, a: 'x' | 'y' | 'z', deg: number) =>
     applyKeepingPillarPosition(item, rotateAboutWorldAxis(item.transform, a, deg))
   const fmt = (n: number) => (n >= 100 ? n.toFixed(0) : n.toFixed(1))
@@ -134,6 +134,15 @@ export function TransformPanel({
     const picking = pickTarget === item.id
     const rotating = rotateTarget === item.id
     const moving = moveTarget === item.id
+    // An item with a parentId has its position derived from the parent (see
+    // QueueItem.relativeOffset) — it isn't moved or rotated on its own, it
+    // rides along with whatever the parent does. So the controls that would
+    // set an independent position/orientation (rotate, place-on-face, move)
+    // don't apply here and are replaced with a short note instead. Scale,
+    // mirror, and reset stay available — they only affect this item's own
+    // shape, not its plate position, so they don't conflict with following
+    // the parent.
+    const isChild = !!item.parentId
     return (
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-2">
@@ -147,73 +156,79 @@ export function TransformPanel({
           )}
         </div>
 
-        <div className="grid grid-cols-3 gap-2">
-          {(['x', 'y', 'z'] as const).map((a) => (
-            <div key={a}>
-              <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Rotate {a.toUpperCase()}</div>
-              <div className="flex gap-1">
-                <button type="button" className={btn} disabled={disabled} onClick={() => rotate(item, a, -90)}>
-                  −90°
-                </button>
-                <button type="button" className={btn} disabled={disabled} onClick={() => rotate(item, a, 90)}>
-                  +90°
-                </button>
-              </div>
+        {isChild ? (
+          <p className="text-xs text-slate-400">Følger plasseringen til modellen den er festet til.</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-3 gap-2">
+              {(['x', 'y', 'z'] as const).map((a) => (
+                <div key={a}>
+                  <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Rotate {a.toUpperCase()}</div>
+                  <div className="flex gap-1">
+                    <button type="button" className={btn} disabled={disabled} onClick={() => rotate(item, a, -90)}>
+                      −90°
+                    </button>
+                    <button type="button" className={btn} disabled={disabled} onClick={() => rotate(item, a, 90)}>
+                      +90°
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <input type="number" className={num} value={angle} step={1} onChange={(e) => setAngle(Number(e.target.value) || 0)} aria-label="Angle in degrees" />
-          <span className="text-xs text-slate-500">° about</span>
-          <select className="px-1.5 py-1 rounded-md border border-slate-200 text-xs" value={axis} onChange={(e) => setAxis(e.target.value as 'x' | 'y' | 'z')} aria-label="Axis">
-            <option value="x">X</option>
-            <option value="y">Y</option>
-            <option value="z">Z</option>
-          </select>
-          <button type="button" className={btn} disabled={disabled} onClick={() => rotate(item, axis, angle)}>
-            Rotate
-          </button>
-          <button
-            type="button"
-            className={picking ? btnOn : btn}
-            disabled={disabled}
-            // A single call: onPickTarget is wired (in App.tsx) to a setter
-            // that already clears rotate/move atomically in one state
-            // update. Also calling onRotateTarget(null)/onMoveTarget(null)
-            // here would fire three separate updates to the same
-            // underlying state and the last one would win, undoing
-            // whichever mode this click just turned on.
-            onClick={() => onPickTarget(picking ? null : item.id)}
-            title="Click a face in the 3D view; that face becomes the bottom"
-          >
-            Place on face
-          </button>
-          <button
-            type="button"
-            className={rotating ? btnOn : btn}
-            disabled={disabled}
-            onClick={() => onRotateTarget(rotating ? null : item.id)}
-            title="Drag the rings in the 3D view to spin the model freely, snapped to the chosen step"
-          >
-            Free rotate
-          </button>
-          <button
-            type="button"
-            className={moving ? btnOn : btn}
-            disabled={disabled}
-            onClick={() => onMoveTarget(moving ? null : item.id)}
-            title="Drag the arrows or the square handle in the 3D view to slide the model across the bed"
-          >
-            Move
-          </button>
-        </div>
-        {picking && <p className="text-xs text-orca-600">Klikk på flaten i 3D-visningen som skal ligge mot plata.</p>}
-        {rotating && (
-          <p className="text-xs text-orca-600">Dra i ringene i 3D-visningen for å rotere fritt.</p>
-        )}
-        {moving && (
-          <p className="text-xs text-orca-600">Dra i pilene eller den firkantede haken i 3D-visningen for å flytte modellen.</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <input type="number" className={num} value={angle} step={1} onChange={(e) => setAngle(Number(e.target.value) || 0)} aria-label="Angle in degrees" />
+              <span className="text-xs text-slate-500">° about</span>
+              <select className="px-1.5 py-1 rounded-md border border-slate-200 text-xs" value={axis} onChange={(e) => setAxis(e.target.value as 'x' | 'y' | 'z')} aria-label="Axis">
+                <option value="x">X</option>
+                <option value="y">Y</option>
+                <option value="z">Z</option>
+              </select>
+              <button type="button" className={btn} disabled={disabled} onClick={() => rotate(item, axis, angle)}>
+                Rotate
+              </button>
+              <button
+                type="button"
+                className={picking ? btnOn : btn}
+                disabled={disabled}
+                // A single call: onPickTarget is wired (in App.tsx) to a setter
+                // that already clears rotate/move atomically in one state
+                // update. Also calling onRotateTarget(null)/onMoveTarget(null)
+                // here would fire three separate updates to the same
+                // underlying state and the last one would win, undoing
+                // whichever mode this click just turned on.
+                onClick={() => onPickTarget(picking ? null : item.id)}
+                title="Click a face in the 3D view; that face becomes the bottom"
+              >
+                Place on face
+              </button>
+              <button
+                type="button"
+                className={rotating ? btnOn : btn}
+                disabled={disabled}
+                onClick={() => onRotateTarget(rotating ? null : item.id)}
+                title="Drag the rings in the 3D view to spin the model freely, snapped to the chosen step"
+              >
+                Free rotate
+              </button>
+              <button
+                type="button"
+                className={moving ? btnOn : btn}
+                disabled={disabled}
+                onClick={() => onMoveTarget(moving ? null : item.id)}
+                title="Drag the arrows or the square handle in the 3D view to slide the model across the bed"
+              >
+                Move
+              </button>
+            </div>
+            {picking && <p className="text-xs text-orca-600">Klikk på flaten i 3D-visningen som skal ligge mot plata.</p>}
+            {rotating && (
+              <p className="text-xs text-orca-600">Dra i ringene i 3D-visningen for å rotere fritt.</p>
+            )}
+            {moving && (
+              <p className="text-xs text-orca-600">Dra i pilene eller den firkantede haken i 3D-visningen for å flytte modellen.</p>
+            )}
+          </>
         )}
 
         <div className="flex flex-wrap items-center gap-2">

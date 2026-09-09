@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { logError, logWarn } from '../lib/log'
 import { identityObjectTransform, parseObjectTransforms } from '../lib/model-transforms'
+import { childOffsetFromParent } from '../lib/plate-tools'
 import { filamentSlotLabels, parseOrcaProfileJson } from '../lib/profiles'
 import { addWorkerListener, getWasmStatus, getWorker, terminateWorker, type WasmStatus } from '../lib/worker-singleton'
 import type {
@@ -189,17 +190,47 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
 
     case 'APPLY_TRANSFORMS': {
       const updates = new Map(action.updates.map(({ id, transform }) => [id, transform]))
-      return {
-        ...state,
-        items: state.items.map((item) => {
-          const transform = updates.get(item.id)
-          if (!transform) return item
+      let items = state.items.map((item) => {
+        const transform = updates.get(item.id)
+        if (!transform) return item
+        return {
+          ...item,
+          transform,
+          ...(item.status === 'done' || item.status === 'slicing' ? { stale: true } : {}),
+        }
+      })
+      // Cascade: an item with relativeOffset has a position defined relative
+      // to its parent (see QueueItem.relativeOffset's own comment), so
+      // whenever any item's transform changes, every child's absolute
+      // offset needs re-deriving from the parent's now-current transform.
+      // Iterated (bounded, not unbounded) rather than a single pass so a
+      // child-of-a-child — a pillar clicked onto another pillar, which
+      // pillarPickOn's plate-wide raycast does allow — sees its own
+      // parent's already-cascaded position, not a stale one; five passes
+      // covers any nesting depth this UI could realistically produce
+      // without an unbounded loop if a parentId chain ever became circular.
+      for (let pass = 0; pass < 5; pass++) {
+        const byId = new Map(items.map((i) => [i.id, i]))
+        let changed = false
+        items = items.map((item) => {
+          if (!item.parentId || !item.relativeOffset) return item
+          const parent = byId.get(item.parentId)
+          if (!parent) return item // orphaned — nothing to derive from
+          const offset = childOffsetFromParent(parent.transform, item.relativeOffset)
+          const prev = item.transform?.offset
+          if (prev && prev[0] === offset[0] && prev[1] === offset[1]) return item
+          changed = true
           return {
             ...item,
-            transform,
+            transform: { ...(item.transform ?? identityObjectTransform()), offset },
             ...(item.status === 'done' || item.status === 'slicing' ? { stale: true } : {}),
           }
-        }),
+        })
+        if (!changed) break
+      }
+      return {
+        ...state,
+        items,
         plate: state.plate.gcode || state.plate.slicing ? { ...state.plate, stale: true } : state.plate,
       }
     }
@@ -405,7 +436,7 @@ export interface SliceQueue {
    *  value until the worker resolves the live one from engine-version.json. */
   engineLabel: string
   isSlicing: boolean
-  addFiles: (files: File[], options?: ({ transform?: ObjectTransform; parentId?: string } | undefined)[]) => void
+  addFiles: (files: File[], options?: ({ transform?: ObjectTransform; parentId?: string; relativeOffset?: [number, number, number] } | undefined)[]) => void
   removeItem: (id: string) => void
   /** Slice every ready item (and re-slice stale results) one after another. */
   sliceAll: () => void
@@ -795,7 +826,7 @@ export function useSliceQueue(
   )
 
   const addFiles = useCallback(
-    (files: File[], options?: ({ transform?: ObjectTransform; parentId?: string } | undefined)[]) => {
+    (files: File[], options?: ({ transform?: ObjectTransform; parentId?: string; relativeOffset?: [number, number, number] } | undefined)[]) => {
       const newItems: QueueItem[] = files.map((f, i) => {
         const conversion = classifyConversion(f.name)
         const opt = options?.[i]
@@ -816,6 +847,7 @@ export function useSliceQueue(
           // model it was generated from) set at creation.
           ...(opt?.transform ? { transform: opt.transform } : {}),
           ...(opt?.parentId ? { parentId: opt.parentId } : {}),
+          ...(opt?.relativeOffset ? { relativeOffset: opt.relativeOffset } : {}),
         }
       })
       dispatch({ type: 'ADD_ITEMS', items: newItems })

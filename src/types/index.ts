@@ -238,8 +238,25 @@ export interface QueueItem {
    *  parent's later transforms (see the comment on handlePillarPick in
    *  App.tsx for why that's a real trade-off, not an oversight), and does
    *  not cascade delete — an orphaned pillar (parent removed) simply shows
-   *  as its own top-level item again. */
+   *  as its own top-level item again.
+   *
+   *  UPDATE: as of the parent-relative positioning feature, parentId now
+   *  also gates that cascade — see relativeOffset below. */
   parentId?: string
+  /** For an item with parentId set: its position relative to the parent,
+   *  captured once at creation via plate-tools.ts's relativeOffsetFromParent
+   *  (frame-independent — unrotates the click point by the parent's rotation
+   *  at that moment, so it stays meaningful regardless of how the parent's
+   *  rotation later changes). Whenever the parent's own transform changes,
+   *  the reducer's APPLY_TRANSFORMS case re-derives this item's absolute
+   *  transform.offset from childOffsetFromParent(parent's new transform,
+   *  this vector) — that's what makes a pillar genuinely follow its parent's
+   *  move/rotate instead of being pinned to a fixed spot on the bed. Height
+   *  (Z) is not re-derived: every object's Z is bed-anchored by the slicing
+   *  engine's own placement step, not a free parameter this app tracks, so
+   *  a pillar's height stays fixed at whatever it was generated with even
+   *  as its X/Y follows the parent. */
+  relativeOffset?: [number, number, number]
 }
 
 export interface SliceProgress {

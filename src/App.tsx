@@ -12,7 +12,7 @@ import { type ConfigField, mergeConfigLayers, resolveConfig, revertField } from 
 import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
 import { identityObjectTransform, sameObjectTransform } from './lib/model-transforms'
-import { current, keepingAssociatedItemPosition, placeOnFace, supportPillarStl } from './lib/plate-tools'
+import { current, keepingAssociatedItemPosition, placeOnFace, relativeOffsetFromParent, supportPillarStl } from './lib/plate-tools'
 import { TransformPanel } from './components/TransformPanel'
 import type { ImportedProfileType } from './lib/profiles'
 import {
@@ -513,11 +513,17 @@ export default function App() {
       // An active mode follows the new selection instead of staying pointed
       // at whatever was previously targeted — clicking a different model
       // while "Free rotate" is on should retarget it, not be ignored.
-      setPickTarget((prev) => (prev !== null ? id : null))
-      setRotateTarget((prev) => (prev !== null ? id : null))
-      setMoveTarget((prev) => (prev !== null ? id : null))
+      // Exception: a child item's position/orientation is derived from its
+      // parent (see ModelPreview.parentId's own comment) — retargeting an
+      // active mode onto it would let the gizmo set an independent
+      // transform that has no meaning there, bypassing the quick-toggle
+      // buttons' own disabling of exactly this. Clear instead of retarget.
+      const isChild = !!queue.find((q) => q.id === id)?.parentId
+      setPickTarget((prev) => (prev !== null ? (isChild ? null : id) : null))
+      setRotateTarget((prev) => (prev !== null ? (isChild ? null : id) : null))
+      setMoveTarget((prev) => (prev !== null ? (isChild ? null : id) : null))
     },
-    [],
+    [queue],
   )
   const togglePillarPick = useCallback(() => {
     setPillarPickOn((v) => !v)
@@ -530,7 +536,8 @@ export default function App() {
       if (pickTarget !== null && id !== pickTarget) return
       const item = queue.find((q) => q.id === id)
       if (!item) return
-      applyTransforms([{ id, transform: keepingAssociatedItemPosition(item, placeOnFace(item.transform, normal)) }])
+      const hasChildren = queue.some((q) => q.parentId === id)
+      applyTransforms([{ id, transform: keepingAssociatedItemPosition(item, placeOnFace(item.transform, normal), hasChildren) }])
       setPickTarget(null)
     },
     [pickTarget, queue, applyTransforms],
@@ -540,8 +547,12 @@ export default function App() {
       if (rotateTarget !== null && id !== rotateTarget) return
       const item = queue.find((q) => q.id === id)
       if (!item) return
+      const hasChildren = queue.some((q) => q.parentId === id)
       applyTransforms([
-        { id, transform: keepingAssociatedItemPosition(item, { ...current(item.transform), rotation, offset: null }) },
+        {
+          id,
+          transform: keepingAssociatedItemPosition(item, { ...current(item.transform), rotation, offset: null }, hasChildren),
+        },
       ])
     },
     [rotateTarget, queue, applyTransforms],
@@ -559,7 +570,7 @@ export default function App() {
     [moveTarget, queue, applyTransforms],
   )
   const handlePillarPick = useCallback(
-    (point: [number, number, number], parentId: string) => {
+    (point: [number, number, number], parentId: string, parentWorldOffset: [number, number]) => {
       const height = point[2]
       if (height < 1) return // clicked too close to the bed — not worth a pillar
       const stl = supportPillarStl(pillarBaseD, pillarTopD, height)
@@ -568,17 +579,33 @@ export default function App() {
         `stotte-${point[0].toFixed(0)}-${point[1].toFixed(0)}-h${height.toFixed(0)}mm.stl`,
         { type: 'model/stl' },
       )
-      // offset, not null: this pillar's entire point is standing exactly
-      // under the clicked spot, not wherever the grid layout would put it.
-      // parentId is a UI grouping hint only (see the comment on QueueItem.parentId)
-      // — it does not make this pillar track the parent's later transforms.
-      // If reorienting the parent leaves a pillar standing in the wrong spot,
-      // that's the trade-off of a manual, physical support: the person who
-      // placed it can see that and delete it, same as they'd do with any
-      // hand-placed support in a real slicer.
-      addFiles([file], [{ transform: { ...identityObjectTransform(), offset: [point[0], point[1]] }, parentId }])
+      const parent = queue.find((q) => q.id === parentId)
+      // The parent's own transform.offset can be null (letting ModelViewer's
+      // shared grid layout place it) — meaningless as a reference point for
+      // "relative to the parent." parentWorldOffset is the parent mesh's
+      // actual current position regardless of which case that is, so use it
+      // for the math (rotation still comes from the parent's real transform,
+      // only the offset needs substituting).
+      const parentTransformNow = { ...current(parent?.transform), offset: parentWorldOffset }
+      const relativeOffset = relativeOffsetFromParent(parentTransformNow, point)
+      // Pin the parent's own offset to this exact spot, if it wasn't already
+      // pinned — the cascade in useSliceQueue's APPLY_TRANSFORMS reducer
+      // case re-derives every child's offset from the parent's *stored*
+      // transform.offset, which only means something once it's an explicit
+      // value rather than null/grid-computed. Once a model has a pillar
+      // attached, its plate position needs to stay knowable and stable for
+      // that relationship to keep meaning anything — the same way "Move"
+      // already pins a position for any item, this just does it
+      // automatically the moment a pillar is added.
+      if (parent && !parent.transform?.offset) {
+        applyTransforms([{ id: parentId, transform: { ...current(parent.transform), offset: parentWorldOffset } }])
+      }
+      addFiles(
+        [file],
+        [{ transform: { ...identityObjectTransform(), offset: [point[0], point[1]] }, parentId, relativeOffset }],
+      )
     },
-    [pillarBaseD, pillarTopD, addFiles],
+    [pillarBaseD, pillarTopD, queue, addFiles, applyTransforms],
   )
   const transformItems = useMemo(
     () =>
@@ -733,7 +760,7 @@ export default function App() {
   // rebuild the WebGL scene.
   const rawPreviewModels = useMemo(
     () =>
-      queue.flatMap((item) => (item.stlFile ? [{ id: item.id, file: item.stlFile, transform: item.transform }] : [])),
+      queue.flatMap((item) => (item.stlFile ? [{ id: item.id, file: item.stlFile, transform: item.transform, parentId: item.parentId }] : [])),
     [queue],
   )
   const previewModels = useStableModelList(rawPreviewModels)

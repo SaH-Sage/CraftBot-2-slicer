@@ -227,7 +227,7 @@ export function QueueItemCard({
   selectedModelId?: string | null
   onSelectModel?: (id: string) => void
   pillarPickOn?: boolean
-  onPillarPick?: (point: [number, number, number], parentId: string) => void
+  onPillarPick?: (point: [number, number, number], parentId: string, parentWorldOffset: [number, number]) => void
   onTogglePillarPick?: () => void
 } & BedProps) {
   const [expanded, setExpanded] = useState(false)
@@ -244,8 +244,8 @@ export function QueueItemCard({
   // WebGL scene on every unrelated re-render while the card is expanded.
   const previewFiles = useMemo(() => (item.stlFile ? [item.stlFile] : []), [item.stlFile])
   const previewModels = useMemo(
-    () => (item.stlFile ? [{ id: item.id, file: item.stlFile, transform: item.transform }] : []),
-    [item.id, item.stlFile, item.transform],
+    () => (item.stlFile ? [{ id: item.id, file: item.stlFile, transform: item.transform, parentId: item.parentId }] : []),
+    [item.id, item.stlFile, item.transform, item.parentId],
   )
 
   const handleExport3mf = async () => {

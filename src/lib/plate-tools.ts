@@ -41,6 +41,44 @@ export function current(t: ObjectTransform | undefined): ObjectTransform {
   return t ?? identityObjectTransform()
 }
 
+/**
+ * Converts a world-space point (e.g. where a pillar was clicked) into a
+ * vector relative to the parent's own origin, expressed in the parent's
+ * *unrotated* local frame — independent of whatever the parent's rotation
+ * happens to be at this exact moment. Pairs with childOffsetFromParent,
+ * which re-applies whatever the parent's rotation *later* becomes to get
+ * the point's current world position — the two together are what let a
+ * support pillar's position genuinely follow its parent (translation and
+ * rotation) rather than being pinned to a fixed spot on the bed.
+ */
+export function relativeOffsetFromParent(
+  parentTransform: ObjectTransform | undefined,
+  worldPoint: [number, number, number],
+): [number, number, number] {
+  const p = current(parentTransform)
+  const parentOrigin = new THREE.Vector3(p.offset?.[0] ?? 0, p.offset?.[1] ?? 0, 0)
+  const local = new THREE.Vector3(...worldPoint).sub(parentOrigin).applyQuaternion(quaternionOf(p).invert())
+  return [local.x, local.y, local.z]
+}
+
+/**
+ * The inverse of relativeOffsetFromParent: given the parent's *current*
+ * transform and a previously-stored relative vector, returns the point's
+ * current world-space X/Y (only X/Y — every object's Z is bed-anchored by
+ * the slicing engine's own placement step, not a free parameter this app
+ * tracks, so a pillar's height stays fixed at whatever it was generated
+ * with even as its X/Y position follows the parent).
+ */
+export function childOffsetFromParent(
+  parentTransform: ObjectTransform | undefined,
+  relativeOffset: [number, number, number],
+): [number, number] {
+  const p = current(parentTransform)
+  const parentOrigin = new THREE.Vector3(p.offset?.[0] ?? 0, p.offset?.[1] ?? 0, 0)
+  const world = new THREE.Vector3(...relativeOffset).applyQuaternion(quaternionOf(p)).add(parentOrigin)
+  return [world.x, world.y]
+}
+
 /** Rotate about a world axis by `degrees`, on top of the current rotation. */
 export function rotateAboutWorldAxis(t: ObjectTransform | undefined, axis: Axis, degrees: number): ObjectTransform {
   const cur = current(t)
@@ -115,8 +153,18 @@ export function resetTransform(): ObjectTransform {
 export function keepingAssociatedItemPosition<T extends { parentId?: string; transform?: ObjectTransform }>(
   item: T,
   next: ObjectTransform,
+  hasChildren = false,
 ): ObjectTransform {
-  return item.parentId ? { ...next, offset: item.transform?.offset ?? null } : next
+  // Two cases need the same protection: an item that IS a child (its own
+  // position is derived from something else, see relativeOffsetFromParent's
+  // comment) and an item that HAS children (something else's position is
+  // derived from it). The second case matters because handlePillarPick only
+  // pins a parent's offset once, at the moment its first pillar is created —
+  // if a later rotate/scale/mirror on the parent itself reset that offset
+  // back to null the ordinary way, the cascade in APPLY_TRANSFORMS would
+  // have nothing but the bed origin to compute the child's position from,
+  // silently breaking the exact relationship this function exists to protect.
+  return item.parentId || hasChildren ? { ...next, offset: item.transform?.offset ?? null } : next
 }
 
 export function uniformScalePercent(t: ObjectTransform | undefined): number {

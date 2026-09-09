@@ -90,6 +90,58 @@ denne gangen rundt punktet kameraet svinger om, ikke rundt modellen. Dra i en
 ring for å svinge *visningen* i faste steg (5/10/15/45°) i stedet for
 frihånd. Vanlig dra-for-å-rotere andre steder i visningen virker som før.
 
+## Pilarer følger nå foreldremodellen sin (flytting og rotasjon)
+
+En større endring: en pilar sin posisjon er ikke lenger et fast punkt på
+plata — den er relativ til modellen den ble klikket på. Flytt eller roter
+hovedmodellen, og alle pilarene som står på den følger med, akkurat som du
+ba om («deres referanseramme er ikke absolutt, den er relativ til deres
+foreldre»). En pilar har ikke lenger egne Move/Free rotate/Place on face-
+kontroller i det hele tatt — verken i sidepanelet eller hurtigknappene i
+3D-visningen — siden det ikke finnes noen selvstendig posisjon for de
+kontrollene å endre lenger; kortet viser i stedet en kort merknad om at den
+følger foreldremodellen. Skalering, speilvending og fjerning fungerer som
+før, siden de bare gjelder pilarens egen form, ikke plasseringen.
+
+Slik virker det: idet en pilar lages, regnes klikkpunktet om til en vektor
+relativt til foreldremodellens origo, i foreldrens *urotert* lokale ramme —
+uavhengig av hvilken rotasjon foreldren måtte ha akkurat da. Hver gang
+foreldrens transformasjon endres (flytt, roter, plasser-på-flate), regnes
+pilarens absolutte posisjon på nytt ut fra denne lagrede vektoren og
+foreldrens *nye* transformasjon. Matematikken (i `plate-tools.ts`) er testet
+grundig og uavhengig — blant annet en 90°-rotasjon kontrollert mot THREE.js
+sin egen, separate 2D-rotasjonsfunksjon, ikke bare mot seg selv.
+
+Underveis dukket det opp to beslektede, snikende feil som begge er rettet
+og dekket av egne regresjonstester:
+
+- **Foreldrens egen plassering var ofte ukjent.** En modell som aldri er
+  flyttet manuelt har `offset: null` — «la rutenett-utregningen bestemme» —
+  og det finnes ingen verdi lagret noe sted for hvor det faktisk endte opp.
+  Løsning: idet en pilar lages, «festes» foreldrens plassering til nøyaktig
+  der den står akkurat da (hentet fra selve 3D-nettets faktiske posisjon,
+  ikke fra den mulige `null`-verdien), slik at forholdet har noe konkret å
+  regne ut fra videre.
+- **En senere rotasjon på foreldren kunne løsne festet igjen.** Den
+  eksisterende «behold posisjon»-fiksen fra forrige runde beskyttet bare et
+  objekt som *er* et barn — ikke et objekt som *har* barn. Uten denne andre
+  fiksen ville det å rotere hovedmodellen (etter at den allerede hadde fått
+  en pilar) nullstille dens egen plassering på nytt, og pilaren ville da bli
+  regnet ut fra plate-origo i stedet for der modellen faktisk står — samme
+  type feil som sist, bare ett skritt lenger unna. Bekreftet med en test som
+  viser nøyaktig hva som ville skjedd uten fiksen, side om side med riktig
+  resultat.
+
+To ting verdt å vite, med vilje ikke løst nå:
+
+- **Pilarens høyde er fast**, selv om X/Y-posisjonen følger foreldren. Om
+  foreldren vippes slik at det opprinnelige klikkpunktet havner et helt
+  annet sted i høyden, er det for stort et skritt (måtte regnere ut og bygge
+  en helt ny STL-geometri for pilaren, hver gang foreldren endres) til å ta
+  som en del av denne rettelsen. X/Y følger nøyaktig; høyden gjør det ikke.
+- **«Arrange»** vil fortsatt kunne flytte en pilar om den er med i utvalget,
+  av samme grunn som nevnt forrige runde.
+
 ## Rettet: pilarer mistet posisjonen sin ved redigering
 
 Ekte bug, funnet nøyaktig: å rotere (eller skalere, eller speilvende) en

@@ -25,6 +25,12 @@ export interface ModelPreview {
   id: string
   file: File
   transform?: ObjectTransform
+  /** Present when this model is a support pillar generated from a click on
+   *  another model. Its position is derived from that parent (see
+   *  QueueItem.relativeOffset in types/index.ts) — the quick-toggle buttons
+   *  below disable Place on face/Free rotate/Move for it, since there's no
+   *  independent position/orientation left for those to set. */
+  parentId?: string
 }
 
 interface Props {
@@ -77,7 +83,7 @@ interface Props {
    *  pillarPickOn is active — z is the pillar's required height, since it always
    *  stands on the bed at z=0 — plus which model was actually clicked, for grouping
    *  the resulting pillar under it in TransformPanel's associated-items list. */
-  onPillarPick?: (point: [number, number, number], parentId: string) => void
+  onPillarPick?: (point: [number, number, number], parentId: string, parentWorldOffset: [number, number]) => void
   /** Toggles pillarPickOn — wired to the "Add pillar" quick-toggle button in the view. */
   onTogglePillarPick?: () => void
 }
@@ -237,7 +243,7 @@ export function ModelViewer({
   // preview that did render and so must not hide it.
   const [loadError, setLoadError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const fileModels = useMemo(() => files.map((file, index) => ({ id: `file-${index}`, file })), [files])
+  const fileModels = useMemo<ModelPreview[]>(() => files.map((file, index) => ({ id: `file-${index}`, file })), [files])
   const previewModels = models ?? fileModels
 
   useEffect(() => {
@@ -564,7 +570,7 @@ export function ModelViewer({
         const hit = raycastAny(e.clientX, e.clientY)
         const parentId = hit ? ((hit.object as THREE.Mesh).userData.modelId as string | undefined) : undefined
         if (hit && parentId && pickRef.current.onPillarPick) {
-          pickRef.current.onPillarPick([hit.point.x, hit.point.y, hit.point.z], parentId)
+          pickRef.current.onPillarPick([hit.point.x, hit.point.y, hit.point.z], parentId, [hit.object.position.x, hit.object.position.y])
         }
         return
       }
@@ -844,20 +850,34 @@ export function ModelViewer({
         <div className="absolute left-2 bottom-9 flex items-center gap-1 rounded-lg bg-white/90 border border-slate-200 px-1.5 py-1 shadow-sm">
           {(() => {
             const targetId = selectedModelId ?? previewModels[0]?.id
-            const noTarget = previewModels.length === 0 || !targetId
+            const targetModel = previewModels.find((m) => m.id === targetId)
+            // A child's position/orientation is derived from its parent (see
+            // ModelPreview.parentId's own comment) — Place on face, Free
+            // rotate, and Move all set an independent position/orientation,
+            // which no longer means anything for it. Add pillar is a
+            // separate, plate-wide mode (click whatever you land on) rather
+            // than something targeting this specific selection, so it's
+            // unaffected and stays enabled below regardless.
+            const noTarget = previewModels.length === 0 || !targetId || !!targetModel?.parentId
             const cls = (active: boolean) =>
               noTarget
                 ? 'px-2 py-1 rounded-md text-slate-300 text-xs font-medium cursor-not-allowed'
                 : active
                   ? 'px-2 py-1 rounded-md bg-orca-500 text-white text-xs font-medium'
                   : 'px-2 py-1 rounded-md text-slate-600 text-xs font-medium hover:bg-slate-100'
+            const title = (fallback: string) =>
+              previewModels.length === 0 || !targetId
+                ? 'Load a model first'
+                : targetModel?.parentId
+                  ? 'This is a support pillar — it follows the model it is attached to'
+                  : fallback
             return (
               <>
                 <button
                   type="button"
                   disabled={noTarget}
                   onClick={() => targetId && onSetInteractionMode(pickTargetId === targetId ? null : 'pick', targetId)}
-                  title={noTarget ? 'Load a model first' : 'Click a face in the 3D view; that face becomes the bottom'}
+                  title={title('Click a face in the 3D view; that face becomes the bottom')}
                   className={cls(pickTargetId === targetId)}
                 >
                   Place on face
@@ -866,7 +886,7 @@ export function ModelViewer({
                   type="button"
                   disabled={noTarget}
                   onClick={() => targetId && onSetInteractionMode(rotateTargetId === targetId ? null : 'rotate', targetId)}
-                  title={noTarget ? 'Load a model first' : 'Drag the rings to spin the model freely, snapped to the chosen step'}
+                  title={title('Drag the rings to spin the model freely, snapped to the chosen step')}
                   className={cls(rotateTargetId === targetId)}
                 >
                   Free rotate
@@ -875,7 +895,7 @@ export function ModelViewer({
                   type="button"
                   disabled={noTarget}
                   onClick={() => targetId && onSetInteractionMode(moveTargetId === targetId ? null : 'move', targetId)}
-                  title={noTarget ? 'Load a model first' : 'Drag the arrows or the square handle to slide the model across the bed'}
+                  title={title('Drag the arrows or the square handle to slide the model across the bed')}
                   className={cls(moveTargetId === targetId)}
                 >
                   Move

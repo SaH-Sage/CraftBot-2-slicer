@@ -167,5 +167,24 @@ describe('plate tools', () => {
       expect(keepingAssociatedItemPosition(ordinaryModel, rotated).offset).toBeNull()
       expect(keepingAssociatedItemPosition(ordinaryModel, setUniformScale(ordinaryModel.transform, 2)).offset).toBeNull()
     })
+
+    it("preserves a PARENT's own offset when it has children, even though the parent isn't a child itself", () => {
+      // Regression test for a second, subtler version of the same bug class:
+      // handlePillarPick pins a parent's offset once, the moment its first
+      // pillar is created. If a *later* rotate/scale/mirror on the parent
+      // itself reset that pinned offset back to null the ordinary way (which
+      // is what should happen to a plain top-level item with no children),
+      // the cascade that moves the pillar would have nothing but the bed
+      // origin to compute its position from — silently breaking the
+      // relationship even though nothing was ever done to the pillar itself.
+      const parentWithChildren = { transform: { ...identityObjectTransform(), offset: [50, 20] as [number, number] } }
+      const rotated = rotateAboutWorldAxis(parentWithChildren.transform, 'z', 90)
+      const result = keepingAssociatedItemPosition(parentWithChildren, rotated, /* hasChildren */ true)
+      expect(result.offset).toEqual([50, 20])
+      // And without the hasChildren flag, the ordinary (correct, for a
+      // childless item) reset-on-rotate behavior still applies.
+      const withoutFlag = keepingAssociatedItemPosition(parentWithChildren, rotated, false)
+      expect(withoutFlag.offset).toBeNull()
+    })
   })
 })

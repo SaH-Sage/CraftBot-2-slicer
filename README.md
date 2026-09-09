@@ -90,6 +90,29 @@ denne gangen rundt punktet kameraet svinger om, ikke rundt modellen. Dra i en
 ring for å svinge *visningen* i faste steg (5/10/15/45°) i stedet for
 frihånd. Vanlig dra-for-å-rotere andre steder i visningen virker som før.
 
+## Klikk og plasser: pilar direkte fra et punkt på modellen
+
+Ny knapp, «Klikk og plasser», ved siden av mål-feltene for støttepilaren. Slå
+den på og klikk et punkt på modellen i 3D-visningen — en pilar dukker opp
+med det samme, akkurat høy nok til å nå fra plata og opp til punktet du
+klikket, og stående nøyaktig under det punktet. Bunn/topp-diameter bruker de
+samme feltene som «Skriv inn mål selv».
+
+Verifisert som en full kjede, ikke bare hver bit for seg: simulerte et klikk
+(en stråle rett ned mot en testmodell), matet treffpunktet gjennom nøyaktig
+den samme høyde/posisjon-logikken appen selv bruker, og skar den resulterende
+pilaren gjennom den ekte motoren — 100 lag × 0.2 mm = nøyaktig 20 mm, samme
+høyde som det simulerte klikket.
+
+## Klikk i visningen for å velge modell
+
+Har du flere ting på platen (f.eks. hoveddelen og en eller flere pilarer),
+kan du nå klikke direkte på en av dem i 3D-visningen for å velge den — den
+får et svakt blått skjær. «Place on face», «Free rotate» og «Move» nederst
+til venstre virker på den valgte modellen i stedet for alltid den første.
+Er en av disse allerede aktiv og du klikker en annen modell, følger den
+aktive modusen med til den nye modellen i stedet for å ignorere klikket.
+
 ## Om «støtte-modifikatorer» — hva som var mulig, og hva som ikke var det
 
 Ekte støtte-blokkere/-forsterkere (der en form direkte styrer motorens egen

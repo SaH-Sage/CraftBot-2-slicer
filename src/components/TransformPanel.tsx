@@ -35,6 +35,15 @@ interface Props {
   /** Model currently attached to the move (translate) gizmo, or null. */
   moveTarget: string | null
   onMoveTarget: (id: string | null) => void
+  /** Support-pillar base/top diameter, shared between the manual "type dimensions"
+   *  flow here and the "click a point in the view" flow the pillarPickOn button drives. */
+  pillarBaseD: number
+  onPillarBaseD: (mm: number) => void
+  pillarTopD: number
+  onPillarTopD: (mm: number) => void
+  /** Whether "click a point to drop a pillar there" is the active mode. */
+  pillarPickOn: boolean
+  onTogglePillarPick: () => void
   onApply: (updates: { id: string; transform: ObjectTransform }[]) => void
   onAddFile: (file: File) => void
   disabled?: boolean
@@ -57,6 +66,12 @@ export function TransformPanel({
   onRotationSnapDeg,
   moveTarget,
   onMoveTarget,
+  pillarBaseD,
+  onPillarBaseD,
+  pillarTopD,
+  onPillarTopD,
+  pillarPickOn,
+  onTogglePillarPick,
   onApply,
   onAddFile,
   disabled,
@@ -67,8 +82,6 @@ export function TransformPanel({
   const [cylD, setCylD] = useState(20)
   const [cylH, setCylH] = useState(30)
   const [sphereD, setSphereD] = useState(20)
-  const [pillarBaseD, setPillarBaseD] = useState(4)
-  const [pillarTopD, setPillarTopD] = useState(1.5)
   const [pillarH, setPillarH] = useState(20)
 
   const apply = (id: string, transform: ObjectTransform) => onApply([{ id, transform }])
@@ -241,14 +254,30 @@ export function TransformPanel({
           <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Manuell støttepilar</div>
           <p className="text-xs text-slate-500 mb-2">
             Motoren støtter ikke ekte støtte-modifikatorer (blokker/forsterker) i denne nettleser-varianten. En pilar er
-            i stedet en egen, smal form du selv plasserer under et overheng med «Move» — akkurat som å skrive ut en ekstra
-            del ved siden av modellen. Smalere topp gjør den lett å knekke av etterpå.
+            i stedet en egen, smal form som skrives ut ved siden av modellen — enten «Klikk og plasser» under, som
+            setter høyden automatisk fra punktet du klikker, eller skriv inn mål selv og plasser den med «Move».
+            Smalere topp gjør den lett å knekke av etterpå.
           </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <input type="number" className={num} value={pillarBaseD} min={0.5} max={50} step={0.5} onChange={(e) => setPillarBaseD(Number(e.target.value) || 0.5)} aria-label="Pillar base diameter mm" />
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <input type="number" className={num} value={pillarBaseD} min={0.5} max={50} step={0.5} onChange={(e) => onPillarBaseD(Number(e.target.value) || 0.5)} aria-label="Pillar base diameter mm" />
             <span className="text-xs text-slate-500">bunn ⌀</span>
-            <input type="number" className={num} value={pillarTopD} min={0.5} max={50} step={0.5} onChange={(e) => setPillarTopD(Number(e.target.value) || 0.5)} aria-label="Pillar top diameter mm" />
-            <span className="text-xs text-slate-500">topp ⌀ ×</span>
+            <input type="number" className={num} value={pillarTopD} min={0.5} max={50} step={0.5} onChange={(e) => onPillarTopD(Number(e.target.value) || 0.5)} aria-label="Pillar top diameter mm" />
+            <span className="text-xs text-slate-500">topp ⌀</span>
+            <button
+              type="button"
+              className={pillarPickOn ? btnOn : btn}
+              disabled={disabled}
+              onClick={onTogglePillarPick}
+              title="Klikk et punkt på modellen i 3D-visningen; pilaren når fra plata og opp dit"
+            >
+              Klikk og plasser
+            </button>
+          </div>
+          {pillarPickOn && (
+            <p className="text-xs text-orca-600 mb-2">Klikk et punkt på modellen i 3D-visningen for å sette en pilar der.</p>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-slate-400">eller skriv inn høyde selv:</span>
             <input type="number" className={num} value={pillarH} min={1} max={200} onChange={(e) => setPillarH(Number(e.target.value) || 1)} aria-label="Pillar height mm" />
             <button
               type="button"

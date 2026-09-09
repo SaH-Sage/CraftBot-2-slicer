@@ -65,6 +65,20 @@ interface Props {
    *  pick/rotate/move state that TransformPanel's per-model buttons do, so either can be used
    *  interchangeably and turning one on always turns the other two off. */
   onSetInteractionMode?: (mode: 'pick' | 'rotate' | 'move' | null, id: string | null) => void
+  /** Which model the quick-toggle buttons (and an active mode) apply to, independent of
+   *  whether any mode is currently on — the fallback before anything's been clicked. */
+  selectedModelId?: string | null
+  /** Fired when a plain click (no mode active, not a drag, not the gizmo) lands on a
+   *  model's surface — lets the view itself drive selection, not just TransformPanel. */
+  onSelectModel?: (id: string) => void
+  /** Whether "click a point to drop a pillar there" is the currently active mode. */
+  pillarPickOn?: boolean
+  /** Fired with the world-space (x, y, z) of a click on any model's surface while
+   *  pillarPickOn is active — z is the pillar's required height, since it always
+   *  stands on the bed at z=0. */
+  onPillarPick?: (point: [number, number, number]) => void
+  /** Toggles pillarPickOn — wired to the "Add pillar" quick-toggle button in the view. */
+  onTogglePillarPick?: () => void
 }
 
 function buildBed(scene: THREE.Scene, bedX: number, bedY: number, bedShape: 'rectangle' | 'circle'): THREE.Object3D[] {
@@ -169,11 +183,42 @@ export function ModelViewer({
   moveTargetId,
   onMoveEnd,
   onSetInteractionMode,
+  selectedModelId,
+  onSelectModel,
+  pillarPickOn,
+  onPillarPick,
+  onTogglePillarPick,
 }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
   // Read through a ref so toggling pick/rotate/move mode does not rebuild the scene.
-  const pickRef = useRef({ pickTargetId, onPickFace, onBounds, rotateTargetId, rotationSnapDeg, onRotateEnd, moveTargetId, onMoveEnd })
-  pickRef.current = { pickTargetId, onPickFace, onBounds, rotateTargetId, rotationSnapDeg, onRotateEnd, moveTargetId, onMoveEnd }
+  const pickRef = useRef({
+    pickTargetId,
+    onPickFace,
+    onBounds,
+    rotateTargetId,
+    rotationSnapDeg,
+    onRotateEnd,
+    moveTargetId,
+    onMoveEnd,
+    selectedModelId,
+    onSelectModel,
+    pillarPickOn,
+    onPillarPick,
+  })
+  pickRef.current = {
+    pickTargetId,
+    onPickFace,
+    onBounds,
+    rotateTargetId,
+    rotationSnapDeg,
+    onRotateEnd,
+    moveTargetId,
+    onMoveEnd,
+    selectedModelId,
+    onSelectModel,
+    pillarPickOn,
+    onPillarPick,
+  }
   // Blocking: nothing could be drawn, so the overlay covering the canvas is
   // the whole content. Distinct from `notice` below, which annotates a
   // preview that did render and so must not hide it.
@@ -330,6 +375,7 @@ export function ModelViewer({
     moveGizmo.showXZ = false
     scene.add(moveGizmo.getHelper())
     let attachedMoveId: string | null = null
+    let highlightedSelectionId: string | null = null
     moveGizmo.addEventListener('dragging-changed', (event) => {
       controls.enabled = !event.value
       if (event.value === false && attachedMoveId && pickRef.current.onMoveEnd) {
@@ -382,6 +428,15 @@ export function ModelViewer({
       const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1)
       raycaster.setFromCamera(ndc, camera)
       return raycaster.intersectObjects(pickableTarget(), false)[0]
+    }
+    // Unscoped version for pillar-picking and click-to-select: any model on
+    // the plate is a valid hit, not just whichever one Place on face is
+    // currently restricted to.
+    function raycastAny(clientX: number, clientY: number) {
+      const rect = renderer.domElement.getBoundingClientRect()
+      const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1)
+      raycaster.setFromCamera(ndc, camera)
+      return raycaster.intersectObjects(meshes, false)[0]
     }
 
     // Recomputing the flood-fill is the one non-trivial cost here; skip it
@@ -439,7 +494,31 @@ export function ModelViewer({
       downAt = { x: e.clientX, y: e.clientY }
     }
     const onPointerMove = (e: PointerEvent) => {
-      if (rotateGizmo.dragging || moveGizmo.dragging || !pickRef.current.pickTargetId) {
+      if (rotateGizmo.dragging || moveGizmo.dragging) {
+        if (patchMesh.visible || cursorMesh.visible) {
+          patchMesh.visible = false
+          cursorMesh.visible = false
+        }
+        return
+      }
+      if (pickRef.current.pillarPickOn) {
+        // Same disc marker as Place on face, minus the flood-filled patch —
+        // that's specifically for showing a flat face's extent, meaningless
+        // for "here's the single point a pillar would rise from".
+        const hit = raycastAny(e.clientX, e.clientY)
+        renderer.domElement.style.cursor = hit ? 'pointer' : 'crosshair'
+        patchMesh.visible = false
+        if (hit && hit.face) {
+          const worldNormal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
+          cursorMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), worldNormal)
+          cursorMesh.position.copy(hit.point).addScaledVector(worldNormal, 0.06)
+          cursorMesh.visible = true
+        } else {
+          cursorMesh.visible = false
+        }
+        return
+      }
+      if (!pickRef.current.pickTargetId) {
         if (patchMesh.visible || cursorMesh.visible) {
           patchMesh.visible = false
           cursorMesh.visible = false
@@ -460,18 +539,38 @@ export function ModelViewer({
       const start = downAt
       downAt = null
       // Only a genuine click (not the release-point of a drag-orbit gesture that
-      // happened to end up over the gizmo's corner) can trigger either the gizmo
-      // or face picking — both read a specific point, and a drag's end point is
-      // incidental, not a choice.
+      // happened to end up over the gizmo's corner) can trigger the gizmo,
+      // pillar-picking, face picking, or selection — all four read a specific
+      // point, and a drag's end point is incidental, not a choice.
       const wasClick = !!start && Math.hypot(e.clientX - start.x, e.clientY - start.y) <= 4
       if (rotateGizmo.dragging || moveGizmo.dragging) return
       if (wasClick && viewHelper.handleClick(e)) return
-      if (!wasClick || !pickRef.current.pickTargetId || !pickRef.current.onPickFace) return
-      const hit = raycastAt(e.clientX, e.clientY)
-      if (!hit || !hit.face) return
-      const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
-      const id = (hit.object as THREE.Mesh).userData.modelId as string | undefined
-      if (id) pickRef.current.onPickFace(id, [normal.x, normal.y, normal.z])
+      if (!wasClick) return
+
+      if (pickRef.current.pillarPickOn) {
+        const hit = raycastAny(e.clientX, e.clientY)
+        if (hit && pickRef.current.onPillarPick) pickRef.current.onPillarPick([hit.point.x, hit.point.y, hit.point.z])
+        return
+      }
+
+      if (pickRef.current.pickTargetId && pickRef.current.onPickFace) {
+        const hit = raycastAt(e.clientX, e.clientY)
+        if (hit && hit.face) {
+          const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
+          const id = (hit.object as THREE.Mesh).userData.modelId as string | undefined
+          if (id) pickRef.current.onPickFace(id, [normal.x, normal.y, normal.z])
+        }
+        return
+      }
+
+      // Fallback: no mode consumed the click, so it's a plain selection —
+      // an already-active mode (rotate/move) follows the new pick via
+      // onSelectModel's own logic in App.tsx, rather than being ignored.
+      if (pickRef.current.onSelectModel) {
+        const hit = raycastAny(e.clientX, e.clientY)
+        const id = hit ? ((hit.object as THREE.Mesh).userData.modelId as string | undefined) : undefined
+        if (id) pickRef.current.onSelectModel(id)
+      }
     }
     renderer.domElement.addEventListener('pointerdown', onPointerDown)
     renderer.domElement.addEventListener('pointermove', onPointerMove)
@@ -538,7 +637,10 @@ export function ModelViewer({
       const transformed = loaded.map(({ geometry, box, model }) => {
         const center = box.getCenter(new THREE.Vector3())
         geometry.translate(-center.x, -center.y, -box.min.z)
-        const mesh = new THREE.Mesh(geometry, material)
+        // Its own material clone, not the shared instance — selection
+        // highlighting (below) tints one mesh at a time via emissive color,
+        // which would bleed onto every model at once if they shared one.
+        const mesh = new THREE.Mesh(geometry, material.clone())
         mesh.castShadow = true
         mesh.userData.modelId = model.id
         mesh.userData.faceAdjacency = buildFaceAdjacency(geometry)
@@ -645,6 +747,15 @@ export function ModelViewer({
         attachedMoveId = target ? wantMoveId : null
       }
 
+      const wantSelectedId = pickRef.current.selectedModelId ?? null
+      if (wantSelectedId !== highlightedSelectionId) {
+        for (const m of meshes) {
+          const mat = m.material as THREE.MeshPhongMaterial
+          mat.emissive.setHex(m.userData.modelId === wantSelectedId ? 0x1a3a5c : 0x000000)
+        }
+        highlightedSelectionId = wantSelectedId
+      }
+
       // Exactly one of these may touch the camera on a given frame: OrbitControls
       // re-derives its own state from the camera's current position/rotation on
       // every call, so handing back to it the moment the gizmo's snap-animation
@@ -689,8 +800,11 @@ export function ModelViewer({
       rotateGizmo.dispose()
       moveGizmo.dispose()
       renderer.dispose()
-      for (const mesh of meshes) mesh.geometry.dispose()
-      material.dispose()
+      for (const mesh of meshes) {
+        mesh.geometry.dispose()
+        ;(mesh.material as THREE.Material).dispose() // each mesh's own clone, not the shared template
+      }
+      material.dispose() // the template itself — never assigned to a mesh, but still allocated
       for (const obj of bedObjects) {
         if (obj instanceof THREE.Mesh || obj instanceof THREE.Line || obj instanceof THREE.LineSegments) {
           obj.geometry.dispose()
@@ -712,51 +826,68 @@ export function ModelViewer({
       <div ref={mountRef} className="w-full h-full rounded-xl overflow-hidden" style={{ touchAction: 'none' }} />
       {!loadError && onSetInteractionMode && (
         <div className="absolute left-2 bottom-9 flex items-center gap-1 rounded-lg bg-white/90 border border-slate-200 px-1.5 py-1 shadow-sm">
-          <button
-            type="button"
-            disabled={previewModels.length === 0}
-            onClick={() => onSetInteractionMode(pickTargetId === previewModels[0].id ? null : 'pick', previewModels[0].id)}
-            title={previewModels.length === 0 ? 'Load a model first' : 'Click a face in the 3D view; that face becomes the bottom'}
-            className={
-              previewModels.length === 0
+          {(() => {
+            const targetId = selectedModelId ?? previewModels[0]?.id
+            const noTarget = previewModels.length === 0 || !targetId
+            const cls = (active: boolean) =>
+              noTarget
                 ? 'px-2 py-1 rounded-md text-slate-300 text-xs font-medium cursor-not-allowed'
-                : pickTargetId === previewModels[0].id
+                : active
                   ? 'px-2 py-1 rounded-md bg-orca-500 text-white text-xs font-medium'
                   : 'px-2 py-1 rounded-md text-slate-600 text-xs font-medium hover:bg-slate-100'
-            }
-          >
-            Place on face
-          </button>
-          <button
-            type="button"
-            disabled={previewModels.length === 0}
-            onClick={() => onSetInteractionMode(rotateTargetId === previewModels[0].id ? null : 'rotate', previewModels[0].id)}
-            title={previewModels.length === 0 ? 'Load a model first' : 'Drag the rings to spin the model freely, snapped to the chosen step'}
-            className={
-              previewModels.length === 0
-                ? 'px-2 py-1 rounded-md text-slate-300 text-xs font-medium cursor-not-allowed'
-                : rotateTargetId === previewModels[0].id
-                  ? 'px-2 py-1 rounded-md bg-orca-500 text-white text-xs font-medium'
-                  : 'px-2 py-1 rounded-md text-slate-600 text-xs font-medium hover:bg-slate-100'
-            }
-          >
-            Free rotate
-          </button>
-          <button
-            type="button"
-            disabled={previewModels.length === 0}
-            onClick={() => onSetInteractionMode(moveTargetId === previewModels[0].id ? null : 'move', previewModels[0].id)}
-            title={previewModels.length === 0 ? 'Load a model first' : 'Drag the arrows or the square handle to slide the model across the bed'}
-            className={
-              previewModels.length === 0
-                ? 'px-2 py-1 rounded-md text-slate-300 text-xs font-medium cursor-not-allowed'
-                : moveTargetId === previewModels[0].id
-                  ? 'px-2 py-1 rounded-md bg-orca-500 text-white text-xs font-medium'
-                  : 'px-2 py-1 rounded-md text-slate-600 text-xs font-medium hover:bg-slate-100'
-            }
-          >
-            Move
-          </button>
+            return (
+              <>
+                <button
+                  type="button"
+                  disabled={noTarget}
+                  onClick={() => targetId && onSetInteractionMode(pickTargetId === targetId ? null : 'pick', targetId)}
+                  title={noTarget ? 'Load a model first' : 'Click a face in the 3D view; that face becomes the bottom'}
+                  className={cls(pickTargetId === targetId)}
+                >
+                  Place on face
+                </button>
+                <button
+                  type="button"
+                  disabled={noTarget}
+                  onClick={() => targetId && onSetInteractionMode(rotateTargetId === targetId ? null : 'rotate', targetId)}
+                  title={noTarget ? 'Load a model first' : 'Drag the rings to spin the model freely, snapped to the chosen step'}
+                  className={cls(rotateTargetId === targetId)}
+                >
+                  Free rotate
+                </button>
+                <button
+                  type="button"
+                  disabled={noTarget}
+                  onClick={() => targetId && onSetInteractionMode(moveTargetId === targetId ? null : 'move', targetId)}
+                  title={noTarget ? 'Load a model first' : 'Drag the arrows or the square handle to slide the model across the bed'}
+                  className={cls(moveTargetId === targetId)}
+                >
+                  Move
+                </button>
+              </>
+            )
+          })()}
+          {onPillarPick && (
+            <button
+              type="button"
+              disabled={previewModels.length === 0}
+              onClick={onTogglePillarPick}
+              title={
+                previewModels.length === 0
+                  ? 'Load a model first'
+                  : 'Click a point on the model; a support pillar rises from the bed to meet it'
+              }
+              className={
+                previewModels.length === 0
+                  ? 'px-2 py-1 rounded-md text-slate-300 text-xs font-medium cursor-not-allowed'
+                  : pillarPickOn
+                    ? 'px-2 py-1 rounded-md bg-orca-500 text-white text-xs font-medium'
+                    : 'px-2 py-1 rounded-md text-slate-600 text-xs font-medium hover:bg-slate-100'
+              }
+            >
+              Add pillar
+            </button>
+          )}
         </div>
       )}
       {loadError && (

@@ -197,6 +197,11 @@ export function QueueItemCard({
   moveTargetId,
   onMoveEnd,
   onSetInteractionMode,
+  selectedModelId,
+  onSelectModel,
+  pillarPickOn,
+  onPillarPick,
+  onTogglePillarPick,
 }: {
   item: QueueItem
   onExport3mf: (item: QueueItem) => Promise<ArrayBuffer>
@@ -219,6 +224,11 @@ export function QueueItemCard({
   moveTargetId?: string | null
   onMoveEnd?: (id: string, offset: [number, number]) => void
   onSetInteractionMode?: (mode: 'pick' | 'rotate' | 'move' | null, id: string | null) => void
+  selectedModelId?: string | null
+  onSelectModel?: (id: string) => void
+  pillarPickOn?: boolean
+  onPillarPick?: (point: [number, number, number]) => void
+  onTogglePillarPick?: () => void
 } & BedProps) {
   const [expanded, setExpanded] = useState(false)
   const [exporting3mf, setExporting3mf] = useState(false)
@@ -429,6 +439,11 @@ export function QueueItemCard({
                     moveTargetId={moveTargetId}
                     onMoveEnd={onMoveEnd}
                     onSetInteractionMode={onSetInteractionMode}
+                    selectedModelId={selectedModelId}
+                    onSelectModel={onSelectModel}
+                    pillarPickOn={pillarPickOn}
+                    onPillarPick={onPillarPick}
+                    onTogglePillarPick={onTogglePillarPick}
                   />
                 </ViewerErrorBoundary>
               </div>

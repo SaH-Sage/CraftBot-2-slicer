@@ -405,7 +405,7 @@ export interface SliceQueue {
    *  value until the worker resolves the live one from engine-version.json. */
   engineLabel: string
   isSlicing: boolean
-  addFiles: (files: File[]) => void
+  addFiles: (files: File[], initialTransforms?: (ObjectTransform | undefined)[]) => void
   removeItem: (id: string) => void
   /** Slice every ready item (and re-slice stale results) one after another. */
   sliceAll: () => void
@@ -795,8 +795,8 @@ export function useSliceQueue(
   )
 
   const addFiles = useCallback(
-    (files: File[]) => {
-      const newItems: QueueItem[] = files.map((f) => {
+    (files: File[], initialTransforms?: (ObjectTransform | undefined)[]) => {
+      const newItems: QueueItem[] = files.map((f, i) => {
         const conversion = classifyConversion(f.name)
         return {
           id: crypto.randomUUID(),
@@ -809,6 +809,10 @@ export function useSliceQueue(
           // should ever see 'ready' with a null stlFile.
           status: 'converting',
           conversion,
+          // addFiles's id is generated right here, with no way for a caller
+          // to learn it in time for a follow-up applyTransforms — a pillar
+          // dropped at a clicked point needs its position set at creation.
+          ...(initialTransforms?.[i] ? { transform: initialTransforms[i] } : {}),
         }
       })
       dispatch({ type: 'ADD_ITEMS', items: newItems })

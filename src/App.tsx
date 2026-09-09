@@ -11,8 +11,8 @@ import { useSliceQueue } from './hooks/useSliceQueue'
 import { type ConfigField, mergeConfigLayers, resolveConfig, revertField } from './lib/config-layers'
 import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
-import { sameObjectTransform } from './lib/model-transforms'
-import { current, placeOnFace } from './lib/plate-tools'
+import { identityObjectTransform, sameObjectTransform } from './lib/model-transforms'
+import { current, placeOnFace, supportPillarStl } from './lib/plate-tools'
 import { TransformPanel } from './components/TransformPanel'
 import type { ImportedProfileType } from './lib/profiles'
 import {
@@ -485,13 +485,45 @@ export default function App() {
   const [moveTarget, setMoveTarget] = useState<string | null>(null)
   const [rotationSnapDeg, setRotationSnapDeg] = useState(15)
   const [modelSizes, setModelSizes] = useState<Record<string, [number, number, number]>>({})
+  // The model any of the four view interactions currently apply to. Distinct
+  // from pick/rotate/moveTarget below: those three say *which mode* is
+  // active (and for whom), this says *who's selected* even when no mode is
+  // active yet — the fallback the quick-toggle buttons in the view target
+  // before the person has clicked anything, and what a click on a different
+  // model updates so an already-active mode follows the new selection
+  // instead of being ignored.
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null)
+  const [pillarPickOn, setPillarPickOn] = useState(false)
+  const [pillarBaseD, setPillarBaseD] = useState(4)
+  const [pillarTopD, setPillarTopD] = useState(1.5)
   // Place-on-face, Free rotate, and Move are mutually exclusive — turning one
-  // on always turns the other two off, whether triggered from TransformPanel
-  // or from the quick-toggle buttons inside the 3D view itself.
+  // on always turns the other two off (and pillar-pick, a different kind of
+  // mode entirely), whether triggered from TransformPanel or from the
+  // quick-toggle buttons inside the 3D view itself.
   const setInteractionMode = useCallback((mode: 'pick' | 'rotate' | 'move' | null, id: string | null) => {
     setPickTarget(mode === 'pick' ? id : null)
     setRotateTarget(mode === 'rotate' ? id : null)
     setMoveTarget(mode === 'move' ? id : null)
+    setPillarPickOn(false)
+    if (id !== null) setSelectedModelId(id)
+  }, [])
+  const handleSelectModel = useCallback(
+    (id: string) => {
+      setSelectedModelId(id)
+      // An active mode follows the new selection instead of staying pointed
+      // at whatever was previously targeted — clicking a different model
+      // while "Free rotate" is on should retarget it, not be ignored.
+      setPickTarget((prev) => (prev !== null ? id : null))
+      setRotateTarget((prev) => (prev !== null ? id : null))
+      setMoveTarget((prev) => (prev !== null ? id : null))
+    },
+    [],
+  )
+  const togglePillarPick = useCallback(() => {
+    setPillarPickOn((v) => !v)
+    setPickTarget(null)
+    setRotateTarget(null)
+    setMoveTarget(null)
   }, [])
   const handlePickFace = useCallback(
     (id: string, normal: [number, number, number]) => {
@@ -524,6 +556,22 @@ export default function App() {
     },
     [moveTarget, queue, applyTransforms],
   )
+  const handlePillarPick = useCallback(
+    (point: [number, number, number]) => {
+      const height = point[2]
+      if (height < 1) return // clicked too close to the bed — not worth a pillar
+      const stl = supportPillarStl(pillarBaseD, pillarTopD, height)
+      const file = new File(
+        [stl.buffer as ArrayBuffer],
+        `stotte-${point[0].toFixed(0)}-${point[1].toFixed(0)}-h${height.toFixed(0)}mm.stl`,
+        { type: 'model/stl' },
+      )
+      // offset, not null: this pillar's entire point is standing exactly
+      // under the clicked spot, not wherever the grid layout would put it.
+      addFiles([file], [{ ...identityObjectTransform(), offset: [point[0], point[1]] }])
+    },
+    [pillarBaseD, pillarTopD, addFiles],
+  )
   const transformItems = useMemo(
     () =>
       queue
@@ -543,6 +591,12 @@ export default function App() {
       onMoveTarget={(id) => setInteractionMode(id === null ? null : 'move', id)}
       rotationSnapDeg={rotationSnapDeg}
       onRotationSnapDeg={setRotationSnapDeg}
+      pillarBaseD={pillarBaseD}
+      onPillarBaseD={setPillarBaseD}
+      pillarTopD={pillarTopD}
+      onPillarTopD={setPillarTopD}
+      pillarPickOn={pillarPickOn}
+      onTogglePillarPick={togglePillarPick}
       onApply={applyTransforms}
       onAddFile={(file) => addFiles([file])}
       disabled={plateAction !== null}
@@ -819,6 +873,11 @@ export default function App() {
                     moveTargetId={moveTarget}
                     onMoveEnd={handleMoveEnd}
                     onSetInteractionMode={setInteractionMode}
+                    selectedModelId={selectedModelId}
+                    onSelectModel={handleSelectModel}
+                    pillarPickOn={pillarPickOn}
+                    onPillarPick={handlePillarPick}
+                    onTogglePillarPick={togglePillarPick}
                   />
                 </ViewerErrorBoundary>
               </div>
@@ -874,6 +933,11 @@ export default function App() {
                       moveTargetId={moveTarget}
                       onMoveEnd={handleMoveEnd}
                       onSetInteractionMode={setInteractionMode}
+                      selectedModelId={selectedModelId}
+                      onSelectModel={handleSelectModel}
+                      pillarPickOn={pillarPickOn}
+                      onPillarPick={handlePillarPick}
+                      onTogglePillarPick={togglePillarPick}
                     />
                   </ViewerErrorBoundary>
                 </div>
@@ -999,6 +1063,11 @@ export default function App() {
                   moveTargetId={moveTarget}
                   onMoveEnd={handleMoveEnd}
                   onSetInteractionMode={setInteractionMode}
+                  selectedModelId={selectedModelId}
+                  onSelectModel={handleSelectModel}
+                  pillarPickOn={pillarPickOn}
+                  onPillarPick={handlePillarPick}
+                  onTogglePillarPick={togglePillarPick}
                 />
               ))}
             </div>

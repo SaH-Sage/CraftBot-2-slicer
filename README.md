@@ -90,6 +90,34 @@ denne gangen rundt punktet kameraet svinger om, ikke rundt modellen. Dra i en
 ring for å svinge *visningen* i faste steg (5/10/15/45°) i stedet for
 frihånd. Vanlig dra-for-å-rotere andre steder i visningen virker som før.
 
+## Rettet: pilarer mistet posisjonen sin ved redigering
+
+Ekte bug, funnet nøyaktig: å rotere (eller skalere, eller speilvende) en
+pilar nullstilte posisjonen dens (`offset`) — akkurat som å rotere en helt
+vanlig modell alltid har gjort, med vilje, siden den gamle plasseringen ikke
+nødvendigvis passer etter at formen har endret seg. For en pilar er
+posisjonen derimot hele poenget — det nøyaktige punktet du klikket under. Når
+den nullstilles, faller pilaren inn i den samme delte rutenett-utregningen
+som ModelViewer bruker for alt uten fast posisjon — en utregning som ser på
+størrelsen og antallet av *alle* slike gjenstander samlet, ikke bare den ene
+du faktisk endret. Det forklarer nøyaktig det som ble rapportert: pilaren
+«klistret til plata» i stedet for spissen, og senere flyttet seg med
+foreldremodellen uten synlig logikk — begge var symptomer på samme rutenett-
+utregning som reagerte på en endring et helt annet sted.
+
+Rettet på alle stedene det kunne skje — rotasjon (både via gripepunktet i
+visningen og ±90°-knappene), skalering, og speilvending — ved å la en pilar
+beholde sin nøyaktige posisjon gjennom alle disse, mens vanlige modeller
+fortsatt oppfører seg som før. Bekreftet ved faktisk å ødelegge fiksen
+midlertidig og se testen feile riktig, så gjenopprette den og se den bestå —
+ikke bare lest koden og antatt den er riktig.
+
+Én beslektet ting som *ikke* er fikset, verdt å nevne: den eksplisitte
+«Arrange»-handlingen (be motoren pakke platen på nytt) vil fortsatt flytte en
+pilar om den er med i utvalget, siden Arrange sin hele jobb er å flytte ting
+for å pakke bedre — det er ikke det samme problemet som over (en tilfeldig
+bivirkning), men verdt å vite om.
+
 ## Pilarer grupperes under modellen de ble laget fra
 
 En pilar laget med «Klikk og plasser» vises nå ikke lenger som sitt eget,

@@ -96,6 +96,29 @@ export function resetTransform(): ObjectTransform {
   return identityObjectTransform()
 }
 
+/**
+ * Wraps a plate-tools call that would normally reset offset to null (rotate,
+ * scale, mirror, fit-to-bed) so an associated item — a support pillar, whose
+ * parentId marks it as one — keeps the exact spot it was placed at instead.
+ *
+ * Those functions reset offset on purpose for an ordinary model: its
+ * footprint just changed, so the old spot may no longer make sense, and
+ * re-settling into ModelViewer's shared grid layout is reasonable. A
+ * pillar's offset isn't incidental, though — it's the entire reason the
+ * thing exists, the exact point it was clicked under. Letting it fall into
+ * that grid alongside its parent (and everything else with a null offset)
+ * is what made a rotation on the pillar itself move it later, seemingly at
+ * random: the grid's column/row assignment is a function of every
+ * null-offset item's size and count together, not just the one that was
+ * actually edited, so a change anywhere in that set can shift it.
+ */
+export function keepingAssociatedItemPosition<T extends { parentId?: string; transform?: ObjectTransform }>(
+  item: T,
+  next: ObjectTransform,
+): ObjectTransform {
+  return item.parentId ? { ...next, offset: item.transform?.offset ?? null } : next
+}
+
 export function uniformScalePercent(t: ObjectTransform | undefined): number {
   return Math.round(current(t).scale[0] * 1000) / 10
 }

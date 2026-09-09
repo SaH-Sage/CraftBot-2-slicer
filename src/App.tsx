@@ -12,7 +12,7 @@ import { type ConfigField, mergeConfigLayers, resolveConfig, revertField } from 
 import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
 import { identityObjectTransform, sameObjectTransform } from './lib/model-transforms'
-import { current, placeOnFace, supportPillarStl } from './lib/plate-tools'
+import { current, keepingAssociatedItemPosition, placeOnFace, supportPillarStl } from './lib/plate-tools'
 import { TransformPanel } from './components/TransformPanel'
 import type { ImportedProfileType } from './lib/profiles'
 import {
@@ -530,7 +530,7 @@ export default function App() {
       if (pickTarget !== null && id !== pickTarget) return
       const item = queue.find((q) => q.id === id)
       if (!item) return
-      applyTransforms([{ id, transform: placeOnFace(item.transform, normal) }])
+      applyTransforms([{ id, transform: keepingAssociatedItemPosition(item, placeOnFace(item.transform, normal)) }])
       setPickTarget(null)
     },
     [pickTarget, queue, applyTransforms],
@@ -540,7 +540,9 @@ export default function App() {
       if (rotateTarget !== null && id !== rotateTarget) return
       const item = queue.find((q) => q.id === id)
       if (!item) return
-      applyTransforms([{ id, transform: { ...current(item.transform), rotation, offset: null } }])
+      applyTransforms([
+        { id, transform: keepingAssociatedItemPosition(item, { ...current(item.transform), rotation, offset: null }) },
+      ])
     },
     [rotateTarget, queue, applyTransforms],
   )

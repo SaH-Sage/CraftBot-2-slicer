@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ObjectTransform } from '../types'
 import {
   fitToBed,
+  keepingAssociatedItemPosition,
   placeOnFace,
   primitiveFile,
   resetTransform,
@@ -105,6 +106,14 @@ export function TransformPanel({
   }
 
   const apply = (id: string, transform: ObjectTransform) => onApply([{ id, transform }])
+  // See keepingAssociatedItemPosition's own comment in plate-tools.ts for why
+  // this wrapping matters — needed here specifically because these buttons
+  // call rotateAboutWorldAxis/setUniformScale/toggleMirror/fitToBed directly,
+  // not through App.tsx's handleRotateEnd/handlePickFace.
+  const applyKeepingPillarPosition = (item: TransformItem, t: ObjectTransform) =>
+    apply(item.id, keepingAssociatedItemPosition(item, t))
+  const rotate = (item: TransformItem, a: 'x' | 'y' | 'z', deg: number) =>
+    applyKeepingPillarPosition(item, rotateAboutWorldAxis(item.transform, a, deg))
   const fmt = (n: number) => (n >= 100 ? n.toFixed(0) : n.toFixed(1))
 
   // A pillar's parentId only means something while that parent is still on
@@ -143,10 +152,10 @@ export function TransformPanel({
             <div key={a}>
               <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Rotate {a.toUpperCase()}</div>
               <div className="flex gap-1">
-                <button type="button" className={btn} disabled={disabled} onClick={() => apply(item.id, rotateAboutWorldAxis(item.transform, a, -90))}>
+                <button type="button" className={btn} disabled={disabled} onClick={() => rotate(item, a, -90)}>
                   −90°
                 </button>
-                <button type="button" className={btn} disabled={disabled} onClick={() => apply(item.id, rotateAboutWorldAxis(item.transform, a, 90))}>
+                <button type="button" className={btn} disabled={disabled} onClick={() => rotate(item, a, 90)}>
                   +90°
                 </button>
               </div>
@@ -162,7 +171,7 @@ export function TransformPanel({
             <option value="y">Y</option>
             <option value="z">Z</option>
           </select>
-          <button type="button" className={btn} disabled={disabled} onClick={() => apply(item.id, rotateAboutWorldAxis(item.transform, axis, angle))}>
+          <button type="button" className={btn} disabled={disabled} onClick={() => rotate(item, axis, angle)}>
             Rotate
           </button>
           <button
@@ -218,12 +227,12 @@ export function TransformPanel({
               max={10000}
               step={1}
               disabled={disabled}
-              onChange={(e) => apply(item.id, setUniformScale(item.transform, (Number(e.target.value) || 100) / 100))}
+              onChange={(e) => applyKeepingPillarPosition(item, setUniformScale(item.transform, (Number(e.target.value) || 100) / 100))}
               aria-label="Scale percent"
             />
             %
           </label>
-          <button type="button" className={btn} disabled={disabled || !item.size} onClick={() => item.size && apply(item.id, fitToBed(item.transform, item.size, bed))}>
+          <button type="button" className={btn} disabled={disabled || !item.size} onClick={() => item.size && applyKeepingPillarPosition(item, fitToBed(item.transform, item.size, bed))}>
             Fit to bed
           </button>
           <span className="text-xs text-slate-500 ml-1">Mirror</span>
@@ -233,7 +242,7 @@ export function TransformPanel({
               type="button"
               className={item.transform?.mirror[i] === -1 ? btnOn : btn}
               disabled={disabled}
-              onClick={() => apply(item.id, toggleMirror(item.transform, a))}
+              onClick={() => applyKeepingPillarPosition(item, toggleMirror(item.transform, a))}
             >
               {a.toUpperCase()}
             </button>

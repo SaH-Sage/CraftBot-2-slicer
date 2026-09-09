@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { boxStl, cylinderStl, fitToBed, placeOnFace, rotateAboutWorldAxis, sphereStl, supportPillarStl, toggleMirror } from './plate-tools'
+import {
+  boxStl,
+  cylinderStl,
+  fitToBed,
+  keepingAssociatedItemPosition,
+  placeOnFace,
+  rotateAboutWorldAxis,
+  setUniformScale,
+  sphereStl,
+  supportPillarStl,
+  toggleMirror,
+} from './plate-tools'
 import { identityObjectTransform } from './model-transforms'
 
 // 'ZYX', matching plate-tools.ts's own decomposition order — see the comment
@@ -126,5 +137,35 @@ describe('plate tools', () => {
     expect(rAtMinZ).toBeCloseTo(3, 1) // base diameter 6 -> radius 3
     expect(rAtMaxZ).toBeCloseTo(1, 1) // top diameter 2 -> radius 1
     expect(maxZ - minZ).toBeCloseTo(15, 5)
+  })
+
+  describe('keepingAssociatedItemPosition', () => {
+    // Regression test for a reported bug: rotating (or scaling, or
+    // mirroring) a click-placed support pillar reset its offset to null,
+    // which handed its position to ModelViewer's shared grid layout — a
+    // calculation driven by every offset-null item's size and count
+    // together, not just the one that was actually edited. The pillar would
+    // then jump to wherever that shared grid put it, with no visible
+    // relationship to what was actually clicked.
+    const pillar = { parentId: 'main', transform: { ...identityObjectTransform(), offset: [32, 17] as [number, number] } }
+    const ordinaryModel = { transform: { ...identityObjectTransform(), offset: [10, 5] as [number, number] } }
+
+    it('preserves a pillar\'s offset through rotation', () => {
+      const rotated = rotateAboutWorldAxis(pillar.transform, 'z', 90)
+      expect(rotated.offset).toBeNull() // confirms rotateAboutWorldAxis itself still resets it...
+      const result = keepingAssociatedItemPosition(pillar, rotated)
+      expect(result.offset).toEqual([32, 17]) // ...and the wrapper restores it.
+    })
+
+    it('preserves a pillar\'s offset through scale and mirror', () => {
+      expect(keepingAssociatedItemPosition(pillar, setUniformScale(pillar.transform, 1.5)).offset).toEqual([32, 17])
+      expect(keepingAssociatedItemPosition(pillar, toggleMirror(pillar.transform, 'x')).offset).toEqual([32, 17])
+    })
+
+    it('does not change the existing reset-on-edit behavior for an ordinary model', () => {
+      const rotated = rotateAboutWorldAxis(ordinaryModel.transform, 'z', 90)
+      expect(keepingAssociatedItemPosition(ordinaryModel, rotated).offset).toBeNull()
+      expect(keepingAssociatedItemPosition(ordinaryModel, setUniformScale(ordinaryModel.transform, 2)).offset).toBeNull()
+    })
   })
 })

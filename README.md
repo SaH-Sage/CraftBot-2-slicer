@@ -90,6 +90,35 @@ denne gangen rundt punktet kameraet svinger om, ikke rundt modellen. Dra i en
 ring for å svinge *visningen* i faste steg (5/10/15/45°) i stedet for
 frihånd. Vanlig dra-for-å-rotere andre steder i visningen virker som før.
 
+## Om «støtte-modifikatorer» — hva som var mulig, og hva som ikke var det
+
+Ekte støtte-blokkere/-forsterkere (der en form direkte styrer motorens egen
+støttealgoritme) krever at motoren mottar volum-type-informasjon sammen med
+selve geometrien. Jeg sjekket dette direkte i brobroen (orca-wasm/bridge/
+slicer.cpp): selv 3MF-import — det rikeste formatet broen støtter — slår
+sammen alle volum til ett flatt mesh (`combined.merge(obj->mesh())`) *før*
+noe config eller skjæring i det hele tatt ser det. Det finnes ingen vei
+gjennom for volum-type noe sted. Å bygge dette ordentlig krever å utvide selve
+C++-broen og bygge WASM-motoren på nytt — noe som trenger et bygge-miljø jeg
+ikke har tilgang til her.
+
+I stedet: **manuell støttepilar** — en egen, smal form du selv plasserer
+under et overheng med «Move», og som skrives ut sammen med resten av platen
+som en helt ordinær del. Dette er samme teknikk folk bruker i enhver slicer
+når automatisk støtte ikke er riktig verktøy for akkurat ett sted. Formen er
+avsmalnet (bredere ved bunnen, smalere på toppen — begge mål justerbare) slik
+at den er lett å knekke av etter print, uten å skade selve modellen der den
+har vært i kontakt.
+
+Lagt til samtidig: en **kule**-primitiv, siden formsettet uansett fikk et
+løft. Begge nye formene er skåret gjennom den ekte motoren og verifisert —
+også et realistisk tynt eksempel (2 → 0.6 mm, 30 mm høy).
+
+En mulig videre forbedring, ikke bygget nå: la appen selv måle modellens
+høyde akkurat der pilaren står (ved å sende en stråle ned gjennom modellen på
+den XY-posisjonen), og foreslå en fornuftig pilar-høyde automatisk i stedet
+for at du må anslå den selv.
+
 ## To knapper nederst i Innstillinger
 
 «Ready to slice»-knappen er nå to knapper side ved side. «Ready to slice →»

@@ -66,6 +66,10 @@ export function TransformPanel({
   const [cube, setCube] = useState(20)
   const [cylD, setCylD] = useState(20)
   const [cylH, setCylH] = useState(30)
+  const [sphereD, setSphereD] = useState(20)
+  const [pillarBaseD, setPillarBaseD] = useState(4)
+  const [pillarTopD, setPillarTopD] = useState(1.5)
+  const [pillarH, setPillarH] = useState(20)
 
   const apply = (id: string, transform: ObjectTransform) => onApply([{ id, transform }])
   const fmt = (n: number) => (n >= 100 ? n.toFixed(0) : n.toFixed(1))
@@ -226,6 +230,37 @@ export function TransformPanel({
           <button type="button" className={btn} disabled={disabled} onClick={() => onAddFile(primitiveFile('cylinder', [Math.max(1, cylD), Math.max(1, cylH)]))}>
             Cylinder (mm)
           </button>
+          <span className="mx-1 text-slate-300">|</span>
+          <input type="number" className={num} value={sphereD} min={1} max={200} onChange={(e) => setSphereD(Number(e.target.value) || 1)} aria-label="Sphere diameter mm" />
+          <button type="button" className={btn} disabled={disabled} onClick={() => onAddFile(primitiveFile('sphere', [Math.max(1, sphereD)]))}>
+            Ball (mm)
+          </button>
+        </div>
+
+        <div className="mt-3 pt-3 border-t border-slate-200">
+          <div className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">Manuell støttepilar</div>
+          <p className="text-xs text-slate-500 mb-2">
+            Motoren støtter ikke ekte støtte-modifikatorer (blokker/forsterker) i denne nettleser-varianten. En pilar er
+            i stedet en egen, smal form du selv plasserer under et overheng med «Move» — akkurat som å skrive ut en ekstra
+            del ved siden av modellen. Smalere topp gjør den lett å knekke av etterpå.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input type="number" className={num} value={pillarBaseD} min={0.5} max={50} step={0.5} onChange={(e) => setPillarBaseD(Number(e.target.value) || 0.5)} aria-label="Pillar base diameter mm" />
+            <span className="text-xs text-slate-500">bunn ⌀</span>
+            <input type="number" className={num} value={pillarTopD} min={0.5} max={50} step={0.5} onChange={(e) => setPillarTopD(Number(e.target.value) || 0.5)} aria-label="Pillar top diameter mm" />
+            <span className="text-xs text-slate-500">topp ⌀ ×</span>
+            <input type="number" className={num} value={pillarH} min={1} max={200} onChange={(e) => setPillarH(Number(e.target.value) || 1)} aria-label="Pillar height mm" />
+            <button
+              type="button"
+              className={btn}
+              disabled={disabled}
+              onClick={() =>
+                onAddFile(primitiveFile('pillar', [Math.max(0.5, pillarBaseD), Math.max(0.5, pillarTopD), Math.max(1, pillarH)]))
+              }
+            >
+              Støttepilar (mm)
+            </button>
+          </div>
         </div>
       </div>
     </div>

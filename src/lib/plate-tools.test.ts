@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { boxStl, cylinderStl, fitToBed, placeOnFace, rotateAboutWorldAxis, toggleMirror } from './plate-tools'
+import { boxStl, cylinderStl, fitToBed, placeOnFace, rotateAboutWorldAxis, sphereStl, supportPillarStl, toggleMirror } from './plate-tools'
 import { identityObjectTransform } from './model-transforms'
 
 // 'ZYX', matching plate-tools.ts's own decomposition order — see the comment
@@ -90,7 +90,7 @@ describe('plate tools', () => {
   })
 
   it('writes well-formed binary STL primitives sitting on Z = 0', () => {
-    for (const stl of [boxStl(20, 30, 10), cylinderStl(20, 30, 24)]) {
+    for (const stl of [boxStl(20, 30, 10), cylinderStl(20, 30, 24), sphereStl(20), supportPillarStl(4, 1.5, 20)]) {
       const dv = new DataView(stl.buffer)
       const n = dv.getUint32(80, true)
       expect(84 + n * 50).toBe(stl.byteLength)
@@ -98,5 +98,33 @@ describe('plate tools', () => {
       for (let i = 0; i < n; i++) for (let v = 0; v < 3; v++) minZ = Math.min(minZ, dv.getFloat32(84 + i * 50 + 12 + v * 12 + 8, true))
       expect(minZ).toBeCloseTo(0, 5)
     }
+  })
+
+  it('tapers the support pillar from base to top diameter', () => {
+    const stl = supportPillarStl(6, 2, 15)
+    const dv = new DataView(stl.buffer)
+    const n = dv.getUint32(80, true)
+    let maxR = 0
+    let minZ = Infinity
+    let maxZ = -Infinity
+    let rAtMinZ = 0
+    let rAtMaxZ = 0
+    for (let i = 0; i < n; i++) {
+      for (let v = 0; v < 3; v++) {
+        const base = 84 + i * 50 + 12 + v * 12
+        const x = dv.getFloat32(base, true)
+        const y = dv.getFloat32(base + 4, true)
+        const z = dv.getFloat32(base + 8, true)
+        const r = Math.hypot(x, y)
+        maxR = Math.max(maxR, r)
+        if (z < minZ) { minZ = z; rAtMinZ = r }
+        if (z > maxZ) { maxZ = z; rAtMaxZ = r }
+      }
+    }
+    // Base (bottom, Z=0) should be the wide end; top (Z=height) the narrow one.
+    expect(rAtMinZ).toBeGreaterThan(rAtMaxZ)
+    expect(rAtMinZ).toBeCloseTo(3, 1) // base diameter 6 -> radius 3
+    expect(rAtMaxZ).toBeCloseTo(1, 1) // top diameter 2 -> radius 1
+    expect(maxZ - minZ).toBeCloseTo(15, 5)
   })
 })

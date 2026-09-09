@@ -151,8 +151,56 @@ export function cylinderStl(diameter: number, height: number, segments = 96): Ui
   return stl
 }
 
-export function primitiveFile(kind: 'box' | 'cylinder', dims: number[]): File {
-  const bytes = kind === 'box' ? boxStl(dims[0], dims[1], dims[2]) : cylinderStl(dims[0], dims[1])
-  const name = kind === 'box' ? `kube-${dims[0]}x${dims[1]}x${dims[2]}mm.stl` : `sylinder-d${dims[0]}-h${dims[1]}mm.stl`
-  return new File([bytes.buffer as ArrayBuffer], name, { type: 'model/stl' })
+export function sphereStl(diameter: number, segments = 48): Uint8Array {
+  const geometry = new THREE.SphereGeometry(diameter / 2, segments, Math.max(8, Math.round(segments / 2)))
+  geometry.translate(0, 0, diameter / 2) // sits on Z = 0, matching the other primitives
+  const stl = geometryToStl(geometry, `CraftBot 2 sphere d${diameter} mm`)
+  geometry.dispose()
+  return stl
+}
+
+/**
+ * A tapered cone, wide at the base and narrow at the top — for use as a
+ * manual, hand-placed support column under a specific overhang. The engine
+ * bridge has no path for real support-blocker/enforcer *volumes* (confirmed
+ * by reading orca-wasm/bridge/slicer.cpp: even its 3MF import merges every
+ * volume into one flat mesh before any config or slicing step ever sees it —
+ * volume-type metadata has nowhere to survive to). A pillar sidesteps that
+ * entirely by being an ordinary, separate solid on the plate, printed
+ * alongside the part exactly like any other object — the same technique
+ * people use with any slicer when auto-support isn't the right tool for one
+ * specific spot. The taper is deliberate: a narrow tip means less contact
+ * area on the part, which snaps off after printing far more easily than a
+ * uniform cylinder would.
+ */
+export function supportPillarStl(baseDiameter: number, topDiameter: number, height: number, segments = 48): Uint8Array {
+  const geometry = new THREE.CylinderGeometry(topDiameter / 2, baseDiameter / 2, height, segments)
+  geometry.rotateX(Math.PI / 2)
+  geometry.translate(0, 0, height / 2)
+  const stl = geometryToStl(geometry, `CraftBot 2 support pillar d${baseDiameter}-${topDiameter} h${height} mm`)
+  geometry.dispose()
+  return stl
+}
+
+export function primitiveFile(kind: 'box' | 'cylinder' | 'sphere' | 'pillar', dims: number[]): File {
+  switch (kind) {
+    case 'box':
+      return new File(
+        [boxStl(dims[0], dims[1], dims[2]).buffer as ArrayBuffer],
+        `kube-${dims[0]}x${dims[1]}x${dims[2]}mm.stl`,
+        { type: 'model/stl' },
+      )
+    case 'cylinder':
+      return new File([cylinderStl(dims[0], dims[1]).buffer as ArrayBuffer], `sylinder-d${dims[0]}-h${dims[1]}mm.stl`, {
+        type: 'model/stl',
+      })
+    case 'sphere':
+      return new File([sphereStl(dims[0]).buffer as ArrayBuffer], `kule-d${dims[0]}mm.stl`, { type: 'model/stl' })
+    case 'pillar':
+      return new File(
+        [supportPillarStl(dims[0], dims[1], dims[2]).buffer as ArrayBuffer],
+        `stotte-d${dims[0]}-${dims[1]}-h${dims[2]}mm.stl`,
+        { type: 'model/stl' },
+      )
+  }
 }

@@ -1,18 +1,19 @@
 import clsx from 'clsx'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FileUpload } from './components/FileUpload'
 import { ErrorDotIcon, GithubIcon, ModelIconSm, OrcaLogo, SpinnerIcon, XIcon } from './components/icons'
-import { type ModelPreview, ModelViewer } from './components/ModelViewer'
+import { ModelViewer } from './components/ModelViewer'
 import { PlateActions } from './components/PlateActions'
 import { SettingsPanel } from './components/SettingsPanel'
 import { ConfigSummary, PlateResultCard, QueueItemCard, SliceHeader } from './components/SliceCards'
 import { ViewerErrorBoundary } from './components/ViewerErrorBoundary'
+import { useMergedPreviewModels } from './hooks/useMergedPreviewModels'
 import { useSliceQueue } from './hooks/useSliceQueue'
 import { type ConfigField, mergeConfigLayers, resolveConfig, revertField } from './lib/config-layers'
 import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
-import { identityObjectTransform, sameObjectTransform } from './lib/model-transforms'
-import { current, keepingAssociatedItemPosition, placeOnFace, relativeOffsetFromParent, supportPillarStl } from './lib/plate-tools'
+import { identityObjectTransform } from './lib/model-transforms'
+import { current, placeOnFace, relativeOffsetFromParent, supportPillarStl } from './lib/plate-tools'
 import { TransformPanel } from './components/TransformPanel'
 import type { ImportedProfileType } from './lib/profiles'
 import {
@@ -231,21 +232,6 @@ function filamentSelectionForImport(profile: ImportedProfile, current: string[])
     if (imported && builtIns.includes(imported)) return imported
     return current[index] ?? builtIns.find((name) => !current.includes(name)) ?? builtIns[0]
   })
-}
-
-function useStableModelList(next: ModelPreview[]): ModelPreview[] {
-  const ref = useRef<ModelPreview[]>([])
-  const prev = ref.current
-  const same =
-    prev.length === next.length &&
-    prev.every(
-      (model, index) =>
-        model.id === next[index].id &&
-        model.file === next[index].file &&
-        sameObjectTransform(model.transform, next[index].transform),
-    )
-  if (!same) ref.current = next
-  return ref.current
 }
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -536,8 +522,7 @@ export default function App() {
       if (pickTarget !== null && id !== pickTarget) return
       const item = queue.find((q) => q.id === id)
       if (!item) return
-      const hasChildren = queue.some((q) => q.parentId === id)
-      applyTransforms([{ id, transform: keepingAssociatedItemPosition(item, placeOnFace(item.transform, normal), hasChildren) }])
+      applyTransforms([{ id, transform: placeOnFace(item.transform, normal) }])
       setPickTarget(null)
     },
     [pickTarget, queue, applyTransforms],
@@ -547,13 +532,7 @@ export default function App() {
       if (rotateTarget !== null && id !== rotateTarget) return
       const item = queue.find((q) => q.id === id)
       if (!item) return
-      const hasChildren = queue.some((q) => q.parentId === id)
-      applyTransforms([
-        {
-          id,
-          transform: keepingAssociatedItemPosition(item, { ...current(item.transform), rotation, offset: null }, hasChildren),
-        },
-      ])
+      applyTransforms([{ id, transform: { ...current(item.transform), rotation, offset: null } }])
     },
     [rotateTarget, queue, applyTransforms],
   )
@@ -580,32 +559,26 @@ export default function App() {
         { type: 'model/stl' },
       )
       const parent = queue.find((q) => q.id === parentId)
-      // The parent's own transform.offset can be null (letting ModelViewer's
-      // shared grid layout place it) — meaningless as a reference point for
-      // "relative to the parent." parentWorldOffset is the parent mesh's
-      // actual current position regardless of which case that is, so use it
-      // for the math (rotation still comes from the parent's real transform,
-      // only the offset needs substituting).
+      // relativeOffset captures the click point relative to the parent's own
+      // origin, unrotated by whatever the parent's rotation happens to be
+      // right now — parentWorldOffset (the parent mesh's actual current
+      // position, passed up from ModelViewer's raycast hit) stands in for
+      // the parent's own offset here since that can be null (grid-computed)
+      // at this exact moment, which would be meaningless as a reference
+      // point. This vector is permanent from here on: mergeChildIntoParent
+      // (see its own comment in plate-tools.ts) bakes it directly into the
+      // child's geometry, welded into the parent's own mesh, so there is
+      // nothing left to keep in sync as the parent moves later — it already
+      // is the parent's geometry, sharing whatever single transform the
+      // parent ends up with.
       const parentTransformNow = { ...current(parent?.transform), offset: parentWorldOffset }
       const relativeOffset = relativeOffsetFromParent(parentTransformNow, point)
-      // Pin the parent's own offset to this exact spot, if it wasn't already
-      // pinned — the cascade in useSliceQueue's APPLY_TRANSFORMS reducer
-      // case re-derives every child's offset from the parent's *stored*
-      // transform.offset, which only means something once it's an explicit
-      // value rather than null/grid-computed. Once a model has a pillar
-      // attached, its plate position needs to stay knowable and stable for
-      // that relationship to keep meaning anything — the same way "Move"
-      // already pins a position for any item, this just does it
-      // automatically the moment a pillar is added.
-      if (parent && !parent.transform?.offset) {
-        applyTransforms([{ id: parentId, transform: { ...current(parent.transform), offset: parentWorldOffset } }])
-      }
       addFiles(
         [file],
         [{ transform: { ...identityObjectTransform(), offset: [point[0], point[1]] }, parentId, relativeOffset }],
       )
     },
-    [pillarBaseD, pillarTopD, queue, addFiles, applyTransforms],
+    [pillarBaseD, pillarTopD, queue, addFiles],
   )
   const transformItems = useMemo(
     () =>
@@ -754,16 +727,13 @@ export default function App() {
 
   // ── Derived state ─────────────────────────────────────────────────────────
 
-  // Every loaded model, not just the first — the preview shows the whole
-  // current plate. Transform changes deliberately invalidate the stable list,
-  // while progress/config updates with the same files and transforms do not
-  // rebuild the WebGL scene.
-  const rawPreviewModels = useMemo(
-    () =>
-      queue.flatMap((item) => (item.stlFile ? [{ id: item.id, file: item.stlFile, transform: item.transform, parentId: item.parentId }] : [])),
-    [queue],
-  )
-  const previewModels = useStableModelList(rawPreviewModels)
+  // Every top-level model, not just the first — the preview shows the whole
+  // current plate. A child (has a present parent) never gets its own entry;
+  // its geometry is welded into its parent's, so the preview always matches
+  // what will actually be sliced. See useMergedPreviewModels's own comment
+  // for why this has to be async (STL parsing + geometry work) rather than
+  // a plain useMemo, and how it avoids flickering to empty mid-rebuild.
+  const previewModels = useMergedPreviewModels(queue)
   const previewFiles = useMemo(() => previewModels.map((model) => model.file), [previewModels])
   // Clears a previous ViewerErrorBoundary crash when the file set actually
   // changes (passed as resetKey, not key — see the boundary's own doc
@@ -1086,32 +1056,35 @@ export default function App() {
             )}
 
             <div className="space-y-3">
-              {queue.map((item) => (
-                <QueueItemCard
-                  key={item.id}
-                  item={item}
-                  bedX={bedX}
-                  bedY={bedY}
-                  bedShape={bedShape}
-                  onExport3mf={export3mf}
-                  filamentSlotLabels={slotLabels}
-                  onAssignExtruder={assignExtruder}
-                  pickTargetId={pickTarget}
-                  onPickFace={handlePickFace}
-                  onBounds={setModelSizes}
-                  rotateTargetId={rotateTarget}
-                  rotationSnapDeg={rotationSnapDeg}
-                  onRotateEnd={handleRotateEnd}
-                  moveTargetId={moveTarget}
-                  onMoveEnd={handleMoveEnd}
-                  onSetInteractionMode={setInteractionMode}
-                  selectedModelId={selectedModelId}
-                  onSelectModel={handleSelectModel}
-                  pillarPickOn={pillarPickOn}
-                  onPillarPick={handlePillarPick}
-                  onTogglePillarPick={togglePillarPick}
-                />
-              ))}
+              {queue
+                .filter((item) => !item.parentId || !queue.some((q) => q.id === item.parentId))
+                .map((item) => (
+                  <QueueItemCard
+                    key={item.id}
+                    item={item}
+                    mergedFile={previewModels.find((m) => m.id === item.id)?.file}
+                    bedX={bedX}
+                    bedY={bedY}
+                    bedShape={bedShape}
+                    onExport3mf={export3mf}
+                    filamentSlotLabels={slotLabels}
+                    onAssignExtruder={assignExtruder}
+                    pickTargetId={pickTarget}
+                    onPickFace={handlePickFace}
+                    onBounds={setModelSizes}
+                    rotateTargetId={rotateTarget}
+                    rotationSnapDeg={rotationSnapDeg}
+                    onRotateEnd={handleRotateEnd}
+                    moveTargetId={moveTarget}
+                    onMoveEnd={handleMoveEnd}
+                    onSetInteractionMode={setInteractionMode}
+                    selectedModelId={selectedModelId}
+                    onSelectModel={handleSelectModel}
+                    pillarPickOn={pillarPickOn}
+                    onPillarPick={handlePillarPick}
+                    onTogglePillarPick={togglePillarPick}
+                  />
+                ))}
             </div>
 
             <div className="bg-white rounded-2xl border border-slate-200 p-5">

@@ -90,85 +90,61 @@ denne gangen rundt punktet kameraet svinger om, ikke rundt modellen. Dra i en
 ring for å svinge *visningen* i faste steg (5/10/15/45°) i stedet for
 frihånd. Vanlig dra-for-å-rotere andre steder i visningen virker som før.
 
-## Pilarer følger nå foreldremodellen sin (flytting og rotasjon)
+## Pilarer er nå faktisk sveiset inn i foreldrenes egen geometri
 
-En større endring: en pilar sin posisjon er ikke lenger et fast punkt på
-plata — den er relativ til modellen den ble klikket på. Flytt eller roter
-hovedmodellen, og alle pilarene som står på den følger med, akkurat som du
-ba om («deres referanseramme er ikke absolutt, den er relativ til deres
-foreldre»). En pilar har ikke lenger egne Move/Free rotate/Place on face-
-kontroller i det hele tatt — verken i sidepanelet eller hurtigknappene i
-3D-visningen — siden det ikke finnes noen selvstendig posisjon for de
-kontrollene å endre lenger; kortet viser i stedet en kort merknad om at den
-følger foreldremodellen. Skalering, speilvending og fjerning fungerer som
-før, siden de bare gjelder pilarens egen form, ikke plasseringen.
+En vesentlig omarbeiding av forrige runde. Den forrige løsningen prøvde å
+holde en pilar på plass ved å regne ut en egen posisjon for den hver gang
+foreldremodellen endret seg — det fikk X/Y-flytting og rotasjon rundt Z til
+å virke, men ikke rotasjon rundt de andre aksene, og pilaren kunne aldri
+faktisk løfte seg fra plata. Årsaken var en ekte, bekreftet begrensning i
+selve slice-motoren: den godtar ingen egen høyde-forskyvning per objekt, og
+tvinger ethvert objekt ned mot plata uansett hva som sendes inn — bekreftet
+ved å lese motorens C++-bro direkte, ikke anta det.
 
-Slik virker det: idet en pilar lages, regnes klikkpunktet om til en vektor
-relativt til foreldremodellens origo, i foreldrens *urotert* lokale ramme —
-uavhengig av hvilken rotasjon foreldren måtte ha akkurat da. Hver gang
-foreldrens transformasjon endres (flytt, roter, plasser-på-flate), regnes
-pilarens absolutte posisjon på nytt ut fra denne lagrede vektoren og
-foreldrens *nye* transformasjon. Matematikken (i `plate-tools.ts`) er testet
-grundig og uavhengig — blant annet en 90°-rotasjon kontrollert mot THREE.js
-sin egen, separate 2D-rotasjonsfunksjon, ikke bare mot seg selv.
+Men — riktig påpekt — den begrensningen gjelder separate objekter med hver
+sin egen plassering, ikke geometri som er del av samme sammensmeltede form.
+Slik fungerer «support-modifiers» og lignende i andre slicere også: de er
+ikke en flytende, separat gjenstand motoren har en særfunksjon for — de er
+bare geometri som er del av samme objekt, og motoren senker automatisk hele
+den kombinerte formen ned til der dens laveste punkt er, akkurat som en
+fysisk modell med en innebygd utstikker ville gjort. Løsningen ble derfor å
+faktisk **sveise pilarens trekanter inn i foreldrenes egen STL-fil** — flyttet
+til riktig sted i foreldrenes eget, urotert lokale rom — før noe sendes til
+motoren. Etterpå finnes det bare ett objekt og én transformasjon (foreldrenes
+egen), og motorens eksisterende, velprøvde plasseringslogikk gjør resten helt
+automatisk og riktig, uansett hvilken vei foreldrene vris.
 
-Underveis dukket det opp to beslektede, snikende feil som begge er rettet
-og dekket av egne regresjonstester:
+Dette er testet helt til bunns, ikke bare i egen JavaScript-logikk: en
+pilar ble sveiset inn i en bitte liten foreldre-boks, og formen ble sendt
+gjennom den ekte WASM-motoren to ganger — én gang urotert, én gang med
+foreldrenes transformasjon rotert 90° om en akse som ikke er Z. Den
+urotere skjæringen ga nøyaktig forventet høyde (32 mm); den roterte skjæringen
+ga nøyaktig 10 mm — pilarens bredde, ikke dens høyde — som beviser at hele
+den sammensveisede formen faktisk roteres som én stiv kropp av motorens
+egen, ordinære plasseringslogikk. Dette bekrefter direkte at rotasjon om
+alle akser nå virker riktig, og at «løfte seg fra plata» er en naturlig,
+korrekt konsekvens fremfor noe som må spesialhåndteres.
 
-- **Foreldrens egen plassering var ofte ukjent.** En modell som aldri er
-  flyttet manuelt har `offset: null` — «la rutenett-utregningen bestemme» —
-  og det finnes ingen verdi lagret noe sted for hvor det faktisk endte opp.
-  Løsning: idet en pilar lages, «festes» foreldrens plassering til nøyaktig
-  der den står akkurat da (hentet fra selve 3D-nettets faktiske posisjon,
-  ikke fra den mulige `null`-verdien), slik at forholdet har noe konkret å
-  regne ut fra videre.
-- **En senere rotasjon på foreldren kunne løsne festet igjen.** Den
-  eksisterende «behold posisjon»-fiksen fra forrige runde beskyttet bare et
-  objekt som *er* et barn — ikke et objekt som *har* barn. Uten denne andre
-  fiksen ville det å rotere hovedmodellen (etter at den allerede hadde fått
-  en pilar) nullstille dens egen plassering på nytt, og pilaren ville da bli
-  regnet ut fra plate-origo i stedet for der modellen faktisk står — samme
-  type feil som sist, bare ett skritt lenger unna. Bekreftet med en test som
-  viser nøyaktig hva som ville skjedd uten fiksen, side om side med riktig
-  resultat.
+Praktiske endringer dette fører med seg:
 
-To ting verdt å vite, med vilje ikke løst nå:
-
-- **Pilarens høyde er fast**, selv om X/Y-posisjonen følger foreldren. Om
-  foreldren vippes slik at det opprinnelige klikkpunktet havner et helt
-  annet sted i høyden, er det for stort et skritt (måtte regnere ut og bygge
-  en helt ny STL-geometri for pilaren, hver gang foreldren endres) til å ta
-  som en del av denne rettelsen. X/Y følger nøyaktig; høyden gjør det ikke.
-- **«Arrange»** vil fortsatt kunne flytte en pilar om den er med i utvalget,
-  av samme grunn som nevnt forrige runde.
-
-## Rettet: pilarer mistet posisjonen sin ved redigering
-
-Ekte bug, funnet nøyaktig: å rotere (eller skalere, eller speilvende) en
-pilar nullstilte posisjonen dens (`offset`) — akkurat som å rotere en helt
-vanlig modell alltid har gjort, med vilje, siden den gamle plasseringen ikke
-nødvendigvis passer etter at formen har endret seg. For en pilar er
-posisjonen derimot hele poenget — det nøyaktige punktet du klikket under. Når
-den nullstilles, faller pilaren inn i den samme delte rutenett-utregningen
-som ModelViewer bruker for alt uten fast posisjon — en utregning som ser på
-størrelsen og antallet av *alle* slike gjenstander samlet, ikke bare den ene
-du faktisk endret. Det forklarer nøyaktig det som ble rapportert: pilaren
-«klistret til plata» i stedet for spissen, og senere flyttet seg med
-foreldremodellen uten synlig logikk — begge var symptomer på samme rutenett-
-utregning som reagerte på en endring et helt annet sted.
-
-Rettet på alle stedene det kunne skje — rotasjon (både via gripepunktet i
-visningen og ±90°-knappene), skalering, og speilvending — ved å la en pilar
-beholde sin nøyaktige posisjon gjennom alle disse, mens vanlige modeller
-fortsatt oppfører seg som før. Bekreftet ved faktisk å ødelegge fiksen
-midlertidig og se testen feile riktig, så gjenopprette den og se den bestå —
-ikke bare lest koden og antatt den er riktig.
-
-Én beslektet ting som *ikke* er fikset, verdt å nevne: den eksplisitte
-«Arrange»-handlingen (be motoren pakke platen på nytt) vil fortsatt flytte en
-pilar om den er med i utvalget, siden Arrange sin hele jobb er å flytte ting
-for å pakke bedre — det er ikke det samme problemet som over (en tilfeldig
-bivirkning), men verdt å vite om.
+- Skalering og speilvending av en pilar sin *egen* form fungerer fortsatt
+  direkte i sidepanelet, og bakes nå riktig inn i sveisingen sammen med
+  posisjonen.
+- En pilar har ingen egen «skjær»-status lenger — den er bokstavelig talt
+  en del av foreldrenes geometri, så skjæring av foreldrene dekker den
+  automatisk. Den vises derfor ikke lenger som sin egen, separate rad i
+  «Slice»-fanen (der ville den bare stått fast på «klar» for alltid, siden
+  den aldri skjæres for seg selv — fjernet før det ble en synlig feil).
+- Klikker du «Legg til søtte» et sted som visuelt er på en allerede
+  plassert pilar, festes den nye pilaren til toppnivå-modellen (siden det
+  er dét den sammensmeltede formen faktisk heter for museklikk), ikke til
+  den eksisterende pilaren spesifikt. Flerledds-kjeder støttes fortsatt
+  fullt ut internt om de noen gang oppstår — bekreftet med en egen,
+  rekursiv test — det er bare museklikk som nå normalt lander på
+  toppnivået.
+- 3D-forhåndsvisningen bygger nå den samme sammensveisede formen som
+  skjæringen bruker, asynkront, slik at det du ser alltid stemmer med det
+  som faktisk blir skåret — ikke en forenklet tilnærming som kan avvike.
 
 ## Pilarer grupperes under modellen de ble laget fra
 
@@ -176,15 +152,18 @@ En pilar laget med «Klikk og plasser» vises nå ikke lenger som sitt eget,
 løsrevne element i lista — den grupperes under modellen du klikket på, som
 et «tilknyttet element». Som standard vises hvert tilknyttet element som én
 kompakt linje (navn, mål, en ×-knapp for å fjerne den); klikk linja for å
-utvide til akkurat de samme kontrollene (Place on face, Free rotate, Move,
-Scale, Mirror, Reset) som et element øverst i lista har. Fjernes
-hovedmodellen, dukker en tilhørende pilar opp igjen som sitt eget element —
-den forsvinner aldri.
+utvide til Scale/Mirror/Reset — de eneste kontrollene som fortsatt gir
+mening for et tilknyttet element, siden posisjonen og orienteringen nå er
+sveiset fast inn i foreldrenes egen geometri (se seksjonen lenger opp) og
+ikke lenger er noe Place on face/Free rotate/Move kan endre for seg selv;
+et lite notat viser i stedet at elementet følger foreldrene sine. Fjernes
+hovedmodellen, dukker en tilhørende pilar opp igjen som sitt eget,
+selvstendige element — den forsvinner aldri.
 
-Med vilje **ikke** bygget: at pilaren følger med når hovedmodellen roteres
-etterpå. Vris hovedmodellen til en vinkel som gjør en pilar ubrukelig, og det
-er et bevisst valg — fjern den manuelt med ×-knappen, akkurat som med en
-hvilken som helst hånd-plassert støtte i en vanlig slicer.
+(Tidligere sto det her at pilaren med vilje *ikke* fulgte med når
+hovedmodellen ble flyttet eller rotert etterpå. Det stemte for tilnærmingen
+den gang, men er ikke lenger sant — se seksjonen om sammensveiset geometri
+lenger opp for hvorfor og hvordan det endret seg.)
 
 Bygget om ett hakk enklere enn første forsøk: det var i utgangspunktet et
 eget vis/skjul-nivå for *hele* gruppen med tilknyttede elementer, men det
@@ -247,6 +226,12 @@ når automatisk støtte ikke er riktig verktøy for akkurat ett sted. Formen er
 avsmalnet (bredere ved bunnen, smalere på toppen — begge mål justerbare) slik
 at den er lett å knekke av etter print, uten å skade selve modellen der den
 har vært i kontakt.
+
+(Slik plasseres en pilar ikke lenger — «Klikk og plasser» tok over kort tid
+etter dette, og siden er en pilar sveiset inn i foreldremodellens egen
+geometri og har ingen egen Move-kontroll i det hele tatt. Selve
+begrunnelsen over, hvorfor ekte volum-type-baserte støtte-modifikatorer
+ikke er mulig uten å bygge WASM-motoren på nytt, står fortsatt uendret.)
 
 Lagt til samtidig: en **kule**-primitiv, siden formsettet uansett fikk et
 løft. Begge nye formene er skåret gjennom den ekte motoren og verifisert —

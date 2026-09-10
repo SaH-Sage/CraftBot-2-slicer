@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import {
   boxStl,
+  buildMergedStlForItem,
   cylinderStl,
   fitToBed,
-  keepingAssociatedItemPosition,
+  mergeChildIntoParent,
   placeOnFace,
   rotateAboutWorldAxis,
-  setUniformScale,
   sphereStl,
   supportPillarStl,
   toggleMirror,
@@ -138,53 +138,178 @@ describe('plate tools', () => {
     expect(rAtMaxZ).toBeCloseTo(1, 1) // top diameter 2 -> radius 1
     expect(maxZ - minZ).toBeCloseTo(15, 5)
   })
+})
 
-  describe('keepingAssociatedItemPosition', () => {
-    // Regression test for a reported bug: rotating (or scaling, or
-    // mirroring) a click-placed support pillar reset its offset to null,
-    // which handed its position to ModelViewer's shared grid layout — a
-    // calculation driven by every offset-null item's size and count
-    // together, not just the one that was actually edited. The pillar would
-    // then jump to wherever that shared grid put it, with no visible
-    // relationship to what was actually clicked.
-    const pillar = { parentId: 'main', transform: { ...identityObjectTransform(), offset: [32, 17] as [number, number] } }
-    const ordinaryModel = { transform: { ...identityObjectTransform(), offset: [10, 5] as [number, number] } }
+describe('mergeChildIntoParent', () => {
+  function bboxOf(stl: Uint8Array) {
+    const geo = new THREE.BufferGeometry()
+    // Re-parse via the same low-level reasoning as geometryToStl's writer
+    // (12 floats per triangle after the 84-byte header, normal+3 vertices),
+    // independent of any THREE STL loader — a from-scratch reader keeps this
+    // test from validating the merge function against its own reader.
+    const dv = new DataView(stl.buffer, stl.byteOffset, stl.byteLength)
+    const triCount = dv.getUint32(80, true)
+    const positions = new Float32Array(triCount * 9)
+    let p = 84
+    for (let t = 0; t < triCount; t++) {
+      p += 12 // skip normal
+      for (let v = 0; v < 9; v++) {
+        positions[t * 9 + v] = dv.getFloat32(p, true)
+        p += 4
+      }
+      p += 2 // attribute byte count
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geo.computeBoundingBox()
+    return geo.boundingBox!
+  }
 
-    it('preserves a pillar\'s offset through rotation', () => {
-      const rotated = rotateAboutWorldAxis(pillar.transform, 'z', 90)
-      expect(rotated.offset).toBeNull() // confirms rotateAboutWorldAxis itself still resets it...
-      const result = keepingAssociatedItemPosition(pillar, rotated)
-      expect(result.offset).toEqual([32, 17]) // ...and the wrapper restores it.
+  it('produces exactly parent-count + child-count triangles, and leaves the parent geometry untouched', () => {
+    const parent = boxStl(10, 10, 10)
+    const child = boxStl(2, 2, 2)
+    const parentTriCountBefore = new DataView(parent.buffer, parent.byteOffset).getUint32(80, true)
+    const childTriCount = new DataView(child.buffer, child.byteOffset).getUint32(80, true)
+
+    const merged = mergeChildIntoParent(parent.buffer.slice(parent.byteOffset) as ArrayBuffer, child.buffer.slice(child.byteOffset) as ArrayBuffer, {
+      relativeOffset: [20, 0, 5],
     })
+    const mergedTriCount = new DataView(merged.buffer, merged.byteOffset).getUint32(80, true)
+    expect(mergedTriCount).toBe(parentTriCountBefore + childTriCount)
 
-    it('preserves a pillar\'s offset through scale and mirror', () => {
-      expect(keepingAssociatedItemPosition(pillar, setUniformScale(pillar.transform, 1.5)).offset).toEqual([32, 17])
-      expect(keepingAssociatedItemPosition(pillar, toggleMirror(pillar.transform, 'x')).offset).toEqual([32, 17])
-    })
+    // The original parent buffer must be byte-for-byte unchanged.
+    const parentTriCountAfter = new DataView(parent.buffer, parent.byteOffset).getUint32(80, true)
+    expect(parentTriCountAfter).toBe(parentTriCountBefore)
+  })
 
-    it('does not change the existing reset-on-edit behavior for an ordinary model', () => {
-      const rotated = rotateAboutWorldAxis(ordinaryModel.transform, 'z', 90)
-      expect(keepingAssociatedItemPosition(ordinaryModel, rotated).offset).toBeNull()
-      expect(keepingAssociatedItemPosition(ordinaryModel, setUniformScale(ordinaryModel.transform, 2)).offset).toBeNull()
+  it('translates the child by relativeOffset, expanding the combined bounding box exactly that far', () => {
+    const parent = boxStl(10, 10, 10) // [-5,-5,0] to [5,5,10]
+    const child = boxStl(2, 2, 2) // [-1,-1,0] to [1,1,2] before translation
+    const merged = mergeChildIntoParent(parent.buffer.slice(parent.byteOffset) as ArrayBuffer, child.buffer.slice(child.byteOffset) as ArrayBuffer, {
+      relativeOffset: [20, 0, 5],
     })
+    const box = bboxOf(merged)
+    expect(box.min.toArray()).toEqual([-5, -5, 0])
+    expect(box.max.toArray()).toEqual([21, 5, 10]) // child's max.x=1 + 20 = 21; child's max.z=2+5=7 < parent's 10
+  })
 
-    it("preserves a PARENT's own offset when it has children, even though the parent isn't a child itself", () => {
-      // Regression test for a second, subtler version of the same bug class:
-      // handlePillarPick pins a parent's offset once, the moment its first
-      // pillar is created. If a *later* rotate/scale/mirror on the parent
-      // itself reset that pinned offset back to null the ordinary way (which
-      // is what should happen to a plain top-level item with no children),
-      // the cascade that moves the pillar would have nothing but the bed
-      // origin to compute its position from — silently breaking the
-      // relationship even though nothing was ever done to the pillar itself.
-      const parentWithChildren = { transform: { ...identityObjectTransform(), offset: [50, 20] as [number, number] } }
-      const rotated = rotateAboutWorldAxis(parentWithChildren.transform, 'z', 90)
-      const result = keepingAssociatedItemPosition(parentWithChildren, rotated, /* hasChildren */ true)
-      expect(result.offset).toEqual([50, 20])
-      // And without the hasChildren flag, the ordinary (correct, for a
-      // childless item) reset-on-rotate behavior still applies.
-      const withoutFlag = keepingAssociatedItemPosition(parentWithChildren, rotated, false)
-      expect(withoutFlag.offset).toBeNull()
-    })
+  it('bakes the child rotation, scale, and mirror into its vertices before translating', () => {
+    const tinyParent = boxStl(0.1, 0.1, 0.1) // negligible — isolates the child's own transformed extent
+    const longChild = boxStl(6, 2, 2) // X in [-3,3], Y in [-1,1], Z in [0,2]
+    const merged = mergeChildIntoParent(
+      tinyParent.buffer.slice(tinyParent.byteOffset) as ArrayBuffer,
+      longChild.buffer.slice(longChild.byteOffset) as ArrayBuffer,
+      { relativeOffset: [0, 0, 100], rotation: [0, 0, Math.PI / 2] },
+    )
+    const box = bboxOf(merged)
+    // Independently-expected extent: rotate the child's own known corners by
+    // 90° about Z using THREE's separate applyAxisAngle, then add the offset.
+    const corners = [
+      [-3, -1, 0], [3, -1, 0], [-3, 1, 0], [3, 1, 0],
+      [-3, -1, 2], [3, -1, 2], [-3, 1, 2], [3, 1, 2],
+    ]
+    const expectedMax = new THREE.Vector3(-Infinity, -Infinity, -Infinity)
+    for (const [x, y, z] of corners) {
+      const v = new THREE.Vector3(x, y, z).applyAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2).add(new THREE.Vector3(0, 0, 100))
+      expectedMax.max(v)
+    }
+    expect(box.max.x).toBeCloseTo(expectedMax.x, 3)
+    expect(box.max.y).toBeCloseTo(expectedMax.y, 3)
+    expect(box.max.z).toBeCloseTo(expectedMax.z, 3)
+    // The whole point: the child itself now sits lifted at z=100..102, clear
+    // of the bed — checked via the same independently-rotated corners, not
+    // the merged bbox's overall min (which the tiny parent, near z=0, would
+    // dominate and make this assertion meaningless).
+    const expectedChildMinZ = Math.min(...corners.map(([x, y, z]) => new THREE.Vector3(x, y, z).applyAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2).add(new THREE.Vector3(0, 0, 100)).z))
+    expect(expectedChildMinZ).toBeGreaterThan(99)
+  })
+})
+
+describe('buildMergedStlForItem', () => {
+  function toFile(stl: Uint8Array, name: string) {
+    return new File([stl.buffer.slice(stl.byteOffset, stl.byteOffset + stl.byteLength) as ArrayBuffer], name, { type: 'model/stl' })
+  }
+  function triCountOf(buf: ArrayBuffer) {
+    return new DataView(buf).getUint32(80, true)
+  }
+  function bboxOf(buf: ArrayBuffer) {
+    const geo = new THREE.BufferGeometry()
+    const dv = new DataView(buf)
+    const n = dv.getUint32(80, true)
+    const positions = new Float32Array(n * 9)
+    let p = 84
+    for (let t = 0; t < n; t++) {
+      p += 12
+      for (let v = 0; v < 9; v++) {
+        positions[t * 9 + v] = dv.getFloat32(p, true)
+        p += 4
+      }
+      p += 2
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geo.computeBoundingBox()
+    return geo.boundingBox!
+  }
+
+  it('resolves to the item\'s own bytes unchanged when it has no children', async () => {
+    const mainStl = boxStl(10, 10, 10)
+    const items = [{ id: 'main', stlFile: toFile(mainStl, 'main.stl') }]
+    const result = await buildMergedStlForItem('main', items)
+    expect(triCountOf(result)).toBe(triCountOf(mainStl.buffer.slice(mainStl.byteOffset) as ArrayBuffer))
+  })
+
+  it('merges a single direct child at its relativeOffset', async () => {
+    const mainStl = boxStl(10, 10, 10) // [-5,-5,0]..[5,5,10]
+    const pillarStl = boxStl(2, 2, 2) // [-1,-1,0]..[1,1,2] before translation
+    const items = [
+      { id: 'main', stlFile: toFile(mainStl, 'main.stl') },
+      { id: 'pillarA', stlFile: toFile(pillarStl, 'pillarA.stl'), parentId: 'main', relativeOffset: [20, 0, 5] as [number, number, number] },
+    ]
+    const result = await buildMergedStlForItem('main', items)
+    const box = bboxOf(result)
+    expect(box.max.toArray()).toEqual([21, 5, 10])
+  })
+
+  it('recursively composes a two-level chain (a pillar clicked onto another pillar)', async () => {
+    // Regression coverage for the trickiest case: pillarPickOn's raycast
+    // doesn't distinguish an uploaded model from a previously-placed pillar,
+    // so a grandchild is possible. Its relativeOffset is relative to its
+    // OWN direct parent (pillarA), not the root — the recursive build has to
+    // merge pillarB into pillarA's geometry first, then merge that combined
+    // shape into main's, or the composition would be wrong.
+    const tinyMainStl = boxStl(0.1, 0.1, 0.1) // negligible — isolates the composed chain's own extent
+    const pillarAStl = boxStl(2, 2, 2) // local [-1,-1,0]..[1,1,2]
+    const pillarBStl = boxStl(1, 1, 1) // local [-0.5,-0.5,0]..[0.5,0.5,1]
+    const items = [
+      { id: 'main', stlFile: toFile(tinyMainStl, 'main.stl') },
+      { id: 'pillarA', stlFile: toFile(pillarAStl, 'pillarA.stl'), parentId: 'main', relativeOffset: [20, 0, 5] as [number, number, number] },
+      { id: 'pillarB', stlFile: toFile(pillarBStl, 'pillarB.stl'), parentId: 'pillarA', relativeOffset: [3, 0, 2] as [number, number, number] },
+    ]
+    const result = await buildMergedStlForItem('main', items)
+    const box = bboxOf(result)
+    // pillarB's own local max [0.5, 0.5, 1] shifted by its relativeOffset
+    // [3,0,2] -> [3.5, 0.5, 3] in pillarA's frame, then that shifted again
+    // by pillarA's own relativeOffset [20,0,5] into main's frame:
+    // [23.5, 0.5, 8]. X and Z both isolate this cleanly (pillarA's own 2mm
+    // box doesn't reach as far as pillarB does on either axis); Y is left
+    // unchecked here since pillarA's own box (±1) is wider there than
+    // pillarB's contribution (±0.5) and would dominate that axis instead.
+    expect(box.max.x).toBeCloseTo(23.5, 6)
+    expect(box.max.z).toBeCloseTo(8, 6)
+    const totalTriangles =
+      triCountOf(tinyMainStl.buffer.slice(tinyMainStl.byteOffset) as ArrayBuffer) +
+      triCountOf(pillarAStl.buffer.slice(pillarAStl.byteOffset) as ArrayBuffer) +
+      triCountOf(pillarBStl.buffer.slice(pillarBStl.byteOffset) as ArrayBuffer)
+    expect(triCountOf(result)).toBe(totalTriangles)
+  })
+
+  it('skips a malformed child (missing relativeOffset) instead of failing the whole merge', async () => {
+    const mainStl = boxStl(10, 10, 10)
+    const badChildStl = boxStl(2, 2, 2)
+    const items = [
+      { id: 'main', stlFile: toFile(mainStl, 'main.stl') },
+      { id: 'bad', stlFile: toFile(badChildStl, 'bad.stl'), parentId: 'main' },
+    ]
+    const result = await buildMergedStlForItem('main', items)
+    expect(triCountOf(result)).toBe(triCountOf(mainStl.buffer.slice(mainStl.byteOffset) as ArrayBuffer))
   })
 })

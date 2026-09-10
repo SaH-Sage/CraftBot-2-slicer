@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import type { ObjectTransform } from '../types'
 import { identityObjectTransform } from './model-transforms'
 
@@ -45,11 +46,11 @@ export function current(t: ObjectTransform | undefined): ObjectTransform {
  * Converts a world-space point (e.g. where a pillar was clicked) into a
  * vector relative to the parent's own origin, expressed in the parent's
  * *unrotated* local frame — independent of whatever the parent's rotation
- * happens to be at this exact moment. Pairs with childOffsetFromParent,
- * which re-applies whatever the parent's rotation *later* becomes to get
- * the point's current world position — the two together are what let a
- * support pillar's position genuinely follow its parent (translation and
- * rotation) rather than being pinned to a fixed spot on the bed.
+ * happens to be at that moment. Used once, at creation time, to compute the
+ * permanent offset that mergeChildIntoParent (below) later bakes directly
+ * into the child's geometry — the child's position is never recomputed
+ * after that; the parent's own transform carries it from then on, since
+ * it's now part of the same mesh.
  */
 export function relativeOffsetFromParent(
   parentTransform: ObjectTransform | undefined,
@@ -59,24 +60,6 @@ export function relativeOffsetFromParent(
   const parentOrigin = new THREE.Vector3(p.offset?.[0] ?? 0, p.offset?.[1] ?? 0, 0)
   const local = new THREE.Vector3(...worldPoint).sub(parentOrigin).applyQuaternion(quaternionOf(p).invert())
   return [local.x, local.y, local.z]
-}
-
-/**
- * The inverse of relativeOffsetFromParent: given the parent's *current*
- * transform and a previously-stored relative vector, returns the point's
- * current world-space X/Y (only X/Y — every object's Z is bed-anchored by
- * the slicing engine's own placement step, not a free parameter this app
- * tracks, so a pillar's height stays fixed at whatever it was generated
- * with even as its X/Y position follows the parent).
- */
-export function childOffsetFromParent(
-  parentTransform: ObjectTransform | undefined,
-  relativeOffset: [number, number, number],
-): [number, number] {
-  const p = current(parentTransform)
-  const parentOrigin = new THREE.Vector3(p.offset?.[0] ?? 0, p.offset?.[1] ?? 0, 0)
-  const world = new THREE.Vector3(...relativeOffset).applyQuaternion(quaternionOf(p)).add(parentOrigin)
-  return [world.x, world.y]
 }
 
 /** Rotate about a world axis by `degrees`, on top of the current rotation. */
@@ -134,39 +117,6 @@ export function resetTransform(): ObjectTransform {
   return identityObjectTransform()
 }
 
-/**
- * Wraps a plate-tools call that would normally reset offset to null (rotate,
- * scale, mirror, fit-to-bed) so an associated item — a support pillar, whose
- * parentId marks it as one — keeps the exact spot it was placed at instead.
- *
- * Those functions reset offset on purpose for an ordinary model: its
- * footprint just changed, so the old spot may no longer make sense, and
- * re-settling into ModelViewer's shared grid layout is reasonable. A
- * pillar's offset isn't incidental, though — it's the entire reason the
- * thing exists, the exact point it was clicked under. Letting it fall into
- * that grid alongside its parent (and everything else with a null offset)
- * is what made a rotation on the pillar itself move it later, seemingly at
- * random: the grid's column/row assignment is a function of every
- * null-offset item's size and count together, not just the one that was
- * actually edited, so a change anywhere in that set can shift it.
- */
-export function keepingAssociatedItemPosition<T extends { parentId?: string; transform?: ObjectTransform }>(
-  item: T,
-  next: ObjectTransform,
-  hasChildren = false,
-): ObjectTransform {
-  // Two cases need the same protection: an item that IS a child (its own
-  // position is derived from something else, see relativeOffsetFromParent's
-  // comment) and an item that HAS children (something else's position is
-  // derived from it). The second case matters because handlePillarPick only
-  // pins a parent's offset once, at the moment its first pillar is created —
-  // if a later rotate/scale/mirror on the parent itself reset that offset
-  // back to null the ordinary way, the cascade in APPLY_TRANSFORMS would
-  // have nothing but the bed origin to compute the child's position from,
-  // silently breaking the exact relationship this function exists to protect.
-  return item.parentId || hasChildren ? { ...next, offset: item.transform?.offset ?? null } : next
-}
-
 export function uniformScalePercent(t: ObjectTransform | undefined): number {
   return Math.round(current(t).scale[0] * 1000) / 10
 }
@@ -203,6 +153,118 @@ function geometryToStl(geometry: THREE.BufferGeometry, header: string): Uint8Arr
   }
   if (g !== geometry) g.dispose()
   return new Uint8Array(buf)
+}
+
+/**
+ * Welds a child's STL geometry directly into its parent's, baking the
+ * child's relativeOffset (and its own scale/mirror/rotation, if any) into
+ * its vertex positions before concatenating the two triangle lists into one
+ * binary STL. The result is a single combined shape with no remaining
+ * distinction between "parent" and "child" at the geometry level — exactly
+ * what a support pillar sculpted directly into the model would produce.
+ *
+ * This replaces trying to keep a pillar positioned via its own separate
+ * instance transform (translation/rotation/mirror sent to the engine
+ * alongside the parent's). That approach hit a real, confirmed wall: the
+ * slicing engine's transform protocol has no per-object Z offset, and
+ * unconditionally calls ensure_on_bed() on every independent object, so a
+ * pillar could never actually rise off the bed in the sliced output no
+ * matter what the preview showed. Welding the geometry together sidesteps
+ * that entirely — there is only ever one object, one instance transform
+ * (the parent's), and ensure_on_bed() naturally drops the combined rigid
+ * shape onto whichever point is now lowest, precisely like a real object
+ * with an integral protrusion. Preview and slice are then guaranteed to
+ * agree, since both apply the same single transform to the same geometry.
+ */
+export function mergeChildIntoParent(
+  parentStl: ArrayBuffer,
+  childStl: ArrayBuffer,
+  child: { relativeOffset: [number, number, number]; scale?: [number, number, number]; mirror?: [number, number, number]; rotation?: [number, number, number] },
+): Uint8Array {
+  const loader = new STLLoader()
+  const parentGeo = loader.parse(parentStl)
+  const childGeo = loader.parse(childStl)
+
+  const { relativeOffset, scale = [1, 1, 1], mirror = [1, 1, 1], rotation = [0, 0, 0] } = child
+  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(rotation[0], rotation[1], rotation[2], 'ZYX'))
+  const s = new THREE.Vector3(scale[0] * mirror[0], scale[1] * mirror[1], scale[2] * mirror[2])
+  const m = new THREE.Matrix4().compose(new THREE.Vector3(...relativeOffset), q, s)
+  childGeo.applyMatrix4(m)
+
+  // Both are STLLoader output, which is always non-indexed (binary STL has
+  // no indexing concept — just a flat triangle list) — a plain concat of the
+  // position arrays is a valid combined triangle soup with no further work.
+  const pPos = parentGeo.getAttribute('position') as THREE.BufferAttribute
+  const cPos = childGeo.getAttribute('position') as THREE.BufferAttribute
+  const combinedArray = new Float32Array(pPos.array.length + cPos.array.length)
+  combinedArray.set(pPos.array as Float32Array, 0)
+  combinedArray.set(cPos.array as Float32Array, pPos.array.length)
+  const merged = new THREE.BufferGeometry()
+  merged.setAttribute('position', new THREE.BufferAttribute(combinedArray, 3))
+
+  const result = geometryToStl(merged, 'merged')
+  parentGeo.dispose()
+  childGeo.dispose()
+  merged.dispose()
+  return result
+}
+
+/** The subset of QueueItem that buildMergedStlForItem needs — kept minimal
+ *  and structural (rather than importing QueueItem itself) so this stays
+ *  usable from a plain array of preview models too, not just the queue. */
+export interface MergeableItem {
+  id: string
+  stlFile: File | null
+  parentId?: string
+  relativeOffset?: [number, number, number]
+  transform?: ObjectTransform
+}
+
+/**
+ * Builds the fully-merged STL bytes for one item, welding in every
+ * descendant's geometry (see mergeChildIntoParent's own comment for why) —
+ * recursively, so a pillar clicked onto another pillar (pillarPickOn's
+ * raycast allows this; it doesn't distinguish an uploaded model from a
+ * previously-placed pillar) still ends up correctly nested: each level's
+ * children are merged into its own geometry first, so by the time that
+ * level itself gets merged into *its* parent, its already-attached
+ * grandchildren travel with it for free — one recursive pass handles any
+ * depth without needing a separate multi-pass cascade the way the
+ * old (now-removed) transform-based approach did.
+ *
+ * Safe to call for an item with no children at all — it just resolves to
+ * that item's own STL bytes unchanged, so callers don't need a separate
+ * "does this item have children" branch before deciding whether to merge.
+ */
+export async function buildMergedStlForItem(rootId: string, items: MergeableItem[]): Promise<ArrayBuffer> {
+  const byId = new Map(items.map((i) => [i.id, i]))
+  const childrenByParent = new Map<string, MergeableItem[]>()
+  for (const item of items) {
+    if (!item.parentId) continue
+    const list = childrenByParent.get(item.parentId)
+    if (list) list.push(item)
+    else childrenByParent.set(item.parentId, [item])
+  }
+
+  async function build(id: string): Promise<ArrayBuffer> {
+    const item = byId.get(id)
+    if (!item?.stlFile) throw new Error(`buildMergedStlForItem: no STL data for item ${id}`)
+    let bytes: ArrayBuffer = await item.stlFile.arrayBuffer()
+    for (const child of childrenByParent.get(id) ?? []) {
+      if (!child.relativeOffset) continue // shouldn't happen for a real pillar, but never let a malformed child abort the whole merge
+      const childBytes = await build(child.id)
+      const merged = mergeChildIntoParent(bytes, childBytes, {
+        relativeOffset: child.relativeOffset,
+        scale: child.transform?.scale,
+        mirror: child.transform?.mirror,
+        rotation: child.transform?.rotation,
+      })
+      bytes = merged.buffer.slice(merged.byteOffset, merged.byteOffset + merged.byteLength) as ArrayBuffer
+    }
+    return bytes
+  }
+
+  return build(rootId)
 }
 
 export function boxStl(x: number, y: number, z: number): Uint8Array {

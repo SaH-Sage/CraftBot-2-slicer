@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { logError, logWarn } from '../lib/log'
 import { identityObjectTransform, parseObjectTransforms } from '../lib/model-transforms'
-import { childOffsetFromParent } from '../lib/plate-tools'
+import { buildMergedStlForItem } from '../lib/plate-tools'
 import { filamentSlotLabels, parseOrcaProfileJson } from '../lib/profiles'
 import { addWorkerListener, getWasmStatus, getWorker, terminateWorker, type WasmStatus } from '../lib/worker-singleton'
 import type {
@@ -133,12 +133,17 @@ export function buildPlateActionTransforms(items: Pick<QueueItem, 'transform'>[]
   })
 }
 
+// parentId excluded from both: a support pillar is welded into its parent's
+// geometry at slice time (see buildMergedStlForItem in plate-tools.ts)
+// rather than treated as its own independent object on the plate, so it
+// never appears as its own entry in a current-plate slice or plate action
+// (arrange/auto-orient) — only its parent does, carrying the merged shape.
 function isSliceablePlateItem(item: QueueItem): item is QueueItem & { stlFile: File } {
-  return (item.status === 'ready' || (item.status === 'done' && item.stale === true)) && item.stlFile != null
+  return (item.status === 'ready' || (item.status === 'done' && item.stale === true)) && item.stlFile != null && !item.parentId
 }
 
 function isPlateActionItem(item: QueueItem): item is QueueItem & { stlFile: File } {
-  return (item.status === 'ready' || item.status === 'done') && item.stlFile != null
+  return (item.status === 'ready' || item.status === 'done') && item.stlFile != null && !item.parentId
 }
 
 function toGcodeFilename(name: string): string {
@@ -190,47 +195,17 @@ export function sliceQueueReducer(state: QueueState, action: QueueAction): Queue
 
     case 'APPLY_TRANSFORMS': {
       const updates = new Map(action.updates.map(({ id, transform }) => [id, transform]))
-      let items = state.items.map((item) => {
-        const transform = updates.get(item.id)
-        if (!transform) return item
-        return {
-          ...item,
-          transform,
-          ...(item.status === 'done' || item.status === 'slicing' ? { stale: true } : {}),
-        }
-      })
-      // Cascade: an item with relativeOffset has a position defined relative
-      // to its parent (see QueueItem.relativeOffset's own comment), so
-      // whenever any item's transform changes, every child's absolute
-      // offset needs re-deriving from the parent's now-current transform.
-      // Iterated (bounded, not unbounded) rather than a single pass so a
-      // child-of-a-child — a pillar clicked onto another pillar, which
-      // pillarPickOn's plate-wide raycast does allow — sees its own
-      // parent's already-cascaded position, not a stale one; five passes
-      // covers any nesting depth this UI could realistically produce
-      // without an unbounded loop if a parentId chain ever became circular.
-      for (let pass = 0; pass < 5; pass++) {
-        const byId = new Map(items.map((i) => [i.id, i]))
-        let changed = false
-        items = items.map((item) => {
-          if (!item.parentId || !item.relativeOffset) return item
-          const parent = byId.get(item.parentId)
-          if (!parent) return item // orphaned — nothing to derive from
-          const offset = childOffsetFromParent(parent.transform, item.relativeOffset)
-          const prev = item.transform?.offset
-          if (prev && prev[0] === offset[0] && prev[1] === offset[1]) return item
-          changed = true
-          return {
-            ...item,
-            transform: { ...(item.transform ?? identityObjectTransform()), offset },
-            ...(item.status === 'done' || item.status === 'slicing' ? { stale: true } : {}),
-          }
-        })
-        if (!changed) break
-      }
       return {
         ...state,
-        items,
+        items: state.items.map((item) => {
+          const transform = updates.get(item.id)
+          if (!transform) return item
+          return {
+            ...item,
+            transform,
+            ...(item.status === 'done' || item.status === 'slicing' ? { stale: true } : {}),
+          }
+        }),
         plate: state.plate.gcode || state.plate.slicing ? { ...state.plate, stale: true } : state.plate,
       }
     }
@@ -718,7 +693,13 @@ export function useSliceQueue(
 
     // Narrowed via the predicate so `next.stlFile` stays non-null inside the
     // async closure below, where a property narrowing wouldn't survive.
-    const next = items.find((i): i is QueueItem & { stlFile: File } => i.status === 'ready' && i.stlFile != null)
+    // parentId is excluded — a support pillar is welded into its parent's
+    // geometry (see buildMergedStlForItem/mergeChildIntoParent in
+    // plate-tools.ts) rather than sliced as its own independent object, so
+    // it never advances through this queue on its own.
+    const next = items.find(
+      (i): i is QueueItem & { stlFile: File } => i.status === 'ready' && i.stlFile != null && !i.parentId,
+    )
     if (!next) {
       // Items still converting will re-trigger this effect when they finish.
       if (!items.some((i) => i.status === 'converting')) dispatch({ type: 'QUEUE_IDLE' })
@@ -730,7 +711,7 @@ export function useSliceQueue(
     const requestGeneration = sliceRequestGeneration.current
     void (async () => {
       try {
-        const stl = await next.stlFile.arrayBuffer()
+        const stl = await buildMergedStlForItem(next.id, items)
         if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
         getWorker().postMessage(
@@ -1035,7 +1016,7 @@ export function useSliceQueue(
 
       void (async () => {
         try {
-          const stls = await Promise.all(targetItems.map((item) => item.stlFile.arrayBuffer()))
+          const stls = await Promise.all(targetItems.map((item) => buildMergedStlForItem(item.id, state.items)))
           if (requestGeneration !== sliceRequestGeneration.current) return
           if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
           getWorker().postMessage(
@@ -1075,16 +1056,18 @@ export function useSliceQueue(
   // Exports one queue item's current STL + config snapshot as a .3mf.
   // Independent of slicing — works on any item with STL data, sliced or not.
   const export3mf = useCallback((item: QueueItem): Promise<ArrayBuffer> => {
-    // Bound to a local so the guard still holds inside the async closure.
-    const stlFile = item.stlFile
-    if (!stlFile) return Promise.reject(new Error('No model data for this item'))
+    if (!item.stlFile) return Promise.reject(new Error('No model data for this item'))
     const configSnapshot = configSnapshotRef.current
     return new Promise<ArrayBuffer>((resolve, reject) => {
       const requestId = crypto.randomUUID()
       export3mfResolvers.current.set(requestId, { itemId: item.id, resolve, reject })
       void (async () => {
         try {
-          const stl = await stlFile.arrayBuffer()
+          // Merged rather than item.stlFile.arrayBuffer() directly — a
+          // parent's pillars need to be included in the export, or the
+          // exported file would silently be missing whatever support was
+          // attached (a no-op for anything without children).
+          const stl = await buildMergedStlForItem(item.id, state.items)
           if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
           getWorker().postMessage({ type: 'WRITE_3MF', stl, config: configSnapshot.config, requestId }, [stl])
         } catch (err) {
@@ -1094,7 +1077,7 @@ export function useSliceQueue(
         }
       })()
     })
-  }, [])
+  }, [state.items])
 
   const slicePlate = useCallback(() => {
     if (state.plate.slicing || state.currentId !== null || state.running || plateActionRef.current !== null) return
@@ -1117,7 +1100,7 @@ export function useSliceQueue(
     platePreparedIdsRef.current = new Set(readyItems.map((i) => i.id))
     void (async () => {
       try {
-        const stls = await Promise.all(readyItems.map((i) => i.stlFile.arrayBuffer()))
+        const stls = await Promise.all(readyItems.map((i) => buildMergedStlForItem(i.id, state.items)))
         if (requestGeneration !== sliceRequestGeneration.current) return
         if (getWasmStatus() === 'idle' || getWasmStatus() === 'error') setWasmStatus('loading')
         getWorker().postMessage(

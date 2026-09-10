@@ -182,6 +182,7 @@ export function SliceHeader({
 
 export function QueueItemCard({
   item,
+  mergedFile,
   bedX,
   bedY,
   bedShape,
@@ -204,6 +205,12 @@ export function QueueItemCard({
   onTogglePillarPick,
 }: {
   item: QueueItem
+  /** The merged preview built by App.tsx's useMergedPreviewModels for this
+   *  item — the same geometry that will actually be sliced (this item's own
+   *  shape plus any children welded in). Falls back to item.stlFile itself
+   *  when absent (e.g. still building, or this item has no children so the
+   *  two are identical anyway). */
+  mergedFile?: File
   onExport3mf: (item: QueueItem) => Promise<ArrayBuffer>
   /** One label per real filament slot, from filamentSlotLabels() — the same
    *  count useSliceQueue drops out-of-range assignments against. Only >1 entry
@@ -242,10 +249,11 @@ export function QueueItemCard({
   }, [gcode])
   // Stable array reference so ModelViewer's effect doesn't recreate the
   // WebGL scene on every unrelated re-render while the card is expanded.
-  const previewFiles = useMemo(() => (item.stlFile ? [item.stlFile] : []), [item.stlFile])
+  const effectiveFile = mergedFile ?? item.stlFile
+  const previewFiles = useMemo(() => (effectiveFile ? [effectiveFile] : []), [effectiveFile])
   const previewModels = useMemo(
-    () => (item.stlFile ? [{ id: item.id, file: item.stlFile, transform: item.transform, parentId: item.parentId }] : []),
-    [item.id, item.stlFile, item.transform, item.parentId],
+    () => (effectiveFile ? [{ id: item.id, file: effectiveFile, transform: item.transform }] : []),
+    [item.id, effectiveFile, item.transform],
   )
 
   const handleExport3mf = async () => {

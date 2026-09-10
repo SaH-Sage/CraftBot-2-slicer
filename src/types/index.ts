@@ -231,31 +231,37 @@ export interface QueueItem {
   transform?: ObjectTransform
   /** The model id a support pillar was generated from by clicking a point on
    *  it, or undefined for anything added independently (an upload, or a
-   *  primitive/pillar added via typed dimensions). Purely a UI grouping
-   *  hint — TransformPanel uses it to nest an "associated items" list under
-   *  the parent, collapsed to one line each until expanded. Deliberately not
-   *  load-bearing for anything else: it does not make the pillar follow the
-   *  parent's later transforms (see the comment on handlePillarPick in
-   *  App.tsx for why that's a real trade-off, not an oversight), and does
-   *  not cascade delete — an orphaned pillar (parent removed) simply shows
-   *  as its own top-level item again.
-   *
-   *  UPDATE: as of the parent-relative positioning feature, parentId now
-   *  also gates that cascade — see relativeOffset below. */
+   *  primitive/pillar added via typed dimensions). Its main job is a UI
+   *  grouping hint — TransformPanel nests an "associated items" list under
+   *  the parent, collapsed to one line each until expanded — but it also
+   *  gates the geometry merge described on relativeOffset below: only an
+   *  item with parentId set gets welded into its parent's mesh at slice and
+   *  preview time. Does not cascade delete — an orphaned pillar (parent
+   *  removed) simply shows as its own top-level item again, sliced
+   *  independently from then on. */
   parentId?: string
   /** For an item with parentId set: its position relative to the parent,
    *  captured once at creation via plate-tools.ts's relativeOffsetFromParent
    *  (frame-independent — unrotates the click point by the parent's rotation
-   *  at that moment, so it stays meaningful regardless of how the parent's
-   *  rotation later changes). Whenever the parent's own transform changes,
-   *  the reducer's APPLY_TRANSFORMS case re-derives this item's absolute
-   *  transform.offset from childOffsetFromParent(parent's new transform,
-   *  this vector) — that's what makes a pillar genuinely follow its parent's
-   *  move/rotate instead of being pinned to a fixed spot on the bed. Height
-   *  (Z) is not re-derived: every object's Z is bed-anchored by the slicing
-   *  engine's own placement step, not a free parameter this app tracks, so
-   *  a pillar's height stays fixed at whatever it was generated with even
-   *  as its X/Y follows the parent. */
+   *  at that moment, so the vector stays meaningful regardless of how the
+   *  parent is later transformed). This value is permanent from creation
+   *  onward — nothing recomputes it. Instead, mergeChildIntoParent (see its
+   *  own comment in plate-tools.ts) bakes it directly into the child's
+   *  vertex positions, welding the child's geometry into the parent's own
+   *  mesh before slicing or previewing. From that point there is only one
+   *  object and one instance transform — the parent's — so translation,
+   *  rotation on every axis, mirroring, and scaling of the parent all carry
+   *  the child correctly for free, including lifting it clear of the bed
+   *  when the parent's orientation puts it there: the slicing engine's own
+   *  bed-placement step (ensure_on_bed) naturally drops the *combined* rigid
+   *  shape onto whichever point is now lowest, exactly like a real object
+   *  with an integral protrusion. This replaced an earlier approach that
+   *  tried to keep the child positioned via its own separate instance
+   *  transform sent alongside the parent's — abandoned after confirming, by
+   *  reading the engine's C++ bridge directly, that its transform protocol
+   *  has no per-object Z offset and unconditionally forces every
+   *  independent object flat onto the bed, which would have made the
+   *  preview and the sliced output permanently disagree. */
   relativeOffset?: [number, number, number]
 }
 

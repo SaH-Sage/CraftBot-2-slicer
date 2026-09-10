@@ -5,6 +5,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import { ViewHelper } from 'three/addons/helpers/ViewHelper.js'
 import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import { buildFaceAdjacency, floodFillCoplanar, type FaceAdjacency } from '../lib/face-highlight'
+import { centerAndBaseGeometry } from '../lib/plate-tools'
 import { buildAxisTickGeometry, createAxisTickLines } from '../lib/rotate-gizmo-ticks'
 import { isWebGLAvailable } from '../lib/webgl'
 import type { ObjectTransform } from '../types'
@@ -83,7 +84,13 @@ interface Props {
    *  pillarPickOn is active — z is the pillar's required height, since it always
    *  stands on the bed at z=0 — plus which model was actually clicked, for grouping
    *  the resulting pillar under it in TransformPanel's associated-items list. */
-  onPillarPick?: (point: [number, number, number], parentId: string, parentWorldOffset: [number, number]) => void
+  /** point: world-space location (used for the pillar's own height and for
+   *  naming). relativeOffset: that same point converted into the parent's
+   *  own raw STL file coordinates (world matrix inverted via worldToLocal,
+   *  then centeringOffset added back) — what mergeChildIntoParent actually
+   *  needs to place the pillar's geometry correctly relative to the
+   *  parent's un-recentered mesh data. */
+  onPillarPick?: (point: [number, number, number], parentId: string, relativeOffset: [number, number, number]) => void
   /** Toggles pillarPickOn — wired to the "Add pillar" quick-toggle button in the view. */
   onTogglePillarPick?: () => void
 }
@@ -570,7 +577,17 @@ export function ModelViewer({
         const hit = raycastAny(e.clientX, e.clientY)
         const parentId = hit ? ((hit.object as THREE.Mesh).userData.modelId as string | undefined) : undefined
         if (hit && parentId && pickRef.current.onPillarPick) {
-          pickRef.current.onPillarPick([hit.point.x, hit.point.y, hit.point.z], parentId, [hit.object.position.x, hit.object.position.y])
+          // worldToLocal correctly inverts the mesh's full world matrix
+          // (position, rotation, scale, mirror) in one step — far more
+          // robust than re-deriving that inverse by hand from a few passed-up
+          // numbers. Adding back centeringOffset (see its own comment where
+          // it's set, above) converts from the re-centered preview geometry
+          // to the parent's own raw STL file coordinates, which is what
+          // mergeChildIntoParent actually places the pillar's geometry
+          // relative to.
+          const centeringOffset = (hit.object.userData.centeringOffset as THREE.Vector3 | undefined) ?? new THREE.Vector3()
+          const rawLocal = hit.object.worldToLocal(hit.point.clone()).add(centeringOffset)
+          pickRef.current.onPillarPick([hit.point.x, hit.point.y, hit.point.z], parentId, [rawLocal.x, rawLocal.y, rawLocal.z])
         }
         return
       }
@@ -656,9 +673,19 @@ export function ModelViewer({
       // Centre every raw mesh like the bridge does before applying the
       // instance transform. Models without an explicit arranged offset still
       // use a small fallback grid so a freshly uploaded plate remains legible.
-      const transformed = loaded.map(({ geometry, box, model }) => {
-        const center = box.getCenter(new THREE.Vector3())
-        geometry.translate(-center.x, -center.y, -box.min.z)
+      const transformed = loaded.map(({ geometry, model }) => {
+        // The inverse is added back to a point already converted to this
+        // mesh's local space (via worldToLocal) to recover that point's
+        // position in the RAW STL file's own coordinate system, which is
+        // what mergeChildIntoParent actually operates on for pillar
+        // placement. Without this, a pillar's position was computed
+        // relative to the re-centered geometry instead of the file's own
+        // coordinates — invisible for a synthetic, already-centered test
+        // box, but wrong for any real uploaded model whose own coordinate
+        // origin isn't at its bounding-box center and Z=0 isn't its
+        // lowest point. See centerAndBaseGeometry's own comment for a
+        // second, subtler bug this used to have even after that fix.
+        const centeringOffset = centerAndBaseGeometry(geometry)
         // Its own material clone, not the shared instance — selection
         // highlighting (below) tints one mesh at a time via emissive color,
         // which would bleed onto every model at once if they shared one.
@@ -666,6 +693,7 @@ export function ModelViewer({
         mesh.castShadow = true
         mesh.userData.modelId = model.id
         mesh.userData.faceAdjacency = buildFaceAdjacency(geometry)
+        mesh.userData.centeringOffset = centeringOffset
         applyTransform(mesh, model.transform)
         mesh.updateMatrixWorld(true)
         const size = new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3())

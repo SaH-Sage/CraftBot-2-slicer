@@ -42,26 +42,6 @@ export function current(t: ObjectTransform | undefined): ObjectTransform {
   return t ?? identityObjectTransform()
 }
 
-/**
- * Converts a world-space point (e.g. where a pillar was clicked) into a
- * vector relative to the parent's own origin, expressed in the parent's
- * *unrotated* local frame — independent of whatever the parent's rotation
- * happens to be at that moment. Used once, at creation time, to compute the
- * permanent offset that mergeChildIntoParent (below) later bakes directly
- * into the child's geometry — the child's position is never recomputed
- * after that; the parent's own transform carries it from then on, since
- * it's now part of the same mesh.
- */
-export function relativeOffsetFromParent(
-  parentTransform: ObjectTransform | undefined,
-  worldPoint: [number, number, number],
-): [number, number, number] {
-  const p = current(parentTransform)
-  const parentOrigin = new THREE.Vector3(p.offset?.[0] ?? 0, p.offset?.[1] ?? 0, 0)
-  const local = new THREE.Vector3(...worldPoint).sub(parentOrigin).applyQuaternion(quaternionOf(p).invert())
-  return [local.x, local.y, local.z]
-}
-
 /** Rotate about a world axis by `degrees`, on top of the current rotation. */
 export function rotateAboutWorldAxis(t: ObjectTransform | undefined, axis: Axis, degrees: number): ObjectTransform {
   const cur = current(t)
@@ -124,7 +104,7 @@ export function uniformScalePercent(t: ObjectTransform | undefined): number {
 // ---------------------------------------------------------------------------
 // Primitives: generated in the browser as binary STL files, sitting on Z = 0.
 
-function geometryToStl(geometry: THREE.BufferGeometry, header: string): Uint8Array {
+export function geometryToStl(geometry: THREE.BufferGeometry, header: string): Uint8Array {
   const g = geometry.index ? geometry.toNonIndexed() : geometry
   const pos = g.getAttribute('position')
   const triCount = pos.count / 3
@@ -265,6 +245,40 @@ export async function buildMergedStlForItem(rootId: string, items: MergeableItem
   }
 
   return build(rootId)
+}
+
+/**
+ * Re-centers a geometry in XY and drops it so its lowest point sits at
+ * Z=0 — matching what the slicing engine's own center_object_xy_only does
+ * to a raw mesh before applying an instance transform, so a click on the
+ * rendered preview corresponds to the same point the engine would place.
+ * Mutates the geometry in place (as BufferGeometry.translate always does)
+ * and returns the offset that was subtracted, so a caller can later add it
+ * back to a point already converted into this geometry's new (centered)
+ * local space — e.g. via Object3D.worldToLocal on a raycast hit — to
+ * recover that point's position in the RAW, pre-centering coordinate
+ * system, which is what mergeChildIntoParent actually places pillar
+ * geometry relative to.
+ *
+ * geometry.boundingBox must already be computed (computeBoundingBox()
+ * called) before this runs. Deliberately reads box.min.z into a plain
+ * number before calling translate() — BufferGeometry.translate() also
+ * shifts its own cached boundingBox object in place (the same object, not
+ * a copy), so reading box.min.z any later in this function, or in a
+ * caller holding onto the same box reference, would silently return 0
+ * instead of the original value. This exact ordering mistake once made
+ * every pillar's height calculation wrong for any parent whose raw mesh
+ * wasn't already sitting with its base at local Z=0 — invisible with a
+ * synthetic test box built that way on purpose, real for essentially any
+ * uploaded model.
+ */
+export function centerAndBaseGeometry(geometry: THREE.BufferGeometry): THREE.Vector3 {
+  const box = geometry.boundingBox
+  if (!box) throw new Error('centerAndBaseGeometry: geometry.boundingBox is not computed')
+  const center = box.getCenter(new THREE.Vector3())
+  const minZ = box.min.z
+  geometry.translate(-center.x, -center.y, -minZ)
+  return new THREE.Vector3(center.x, center.y, minZ)
 }
 
 export function boxStl(x: number, y: number, z: number): Uint8Array {

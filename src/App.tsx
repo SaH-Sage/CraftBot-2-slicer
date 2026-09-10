@@ -13,7 +13,7 @@ import { type ConfigField, mergeConfigLayers, resolveConfig, revertField } from 
 import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
 import { identityObjectTransform } from './lib/model-transforms'
-import { current, placeOnFace, relativeOffsetFromParent, supportPillarStl } from './lib/plate-tools'
+import { current, placeOnFace, supportPillarStl } from './lib/plate-tools'
 import { TransformPanel } from './components/TransformPanel'
 import type { ImportedProfileType } from './lib/profiles'
 import {
@@ -549,7 +549,7 @@ export default function App() {
     [moveTarget, queue, applyTransforms],
   )
   const handlePillarPick = useCallback(
-    (point: [number, number, number], parentId: string, parentWorldOffset: [number, number]) => {
+    (point: [number, number, number], parentId: string, relativeOffset: [number, number, number]) => {
       const height = point[2]
       if (height < 1) return // clicked too close to the bed — not worth a pillar
       const stl = supportPillarStl(pillarBaseD, pillarTopD, height)
@@ -558,27 +558,21 @@ export default function App() {
         `stotte-${point[0].toFixed(0)}-${point[1].toFixed(0)}-h${height.toFixed(0)}mm.stl`,
         { type: 'model/stl' },
       )
-      const parent = queue.find((q) => q.id === parentId)
-      // relativeOffset captures the click point relative to the parent's own
-      // origin, unrotated by whatever the parent's rotation happens to be
-      // right now — parentWorldOffset (the parent mesh's actual current
-      // position, passed up from ModelViewer's raycast hit) stands in for
-      // the parent's own offset here since that can be null (grid-computed)
-      // at this exact moment, which would be meaningless as a reference
-      // point. This vector is permanent from here on: mergeChildIntoParent
-      // (see its own comment in plate-tools.ts) bakes it directly into the
-      // child's geometry, welded into the parent's own mesh, so there is
-      // nothing left to keep in sync as the parent moves later — it already
-      // is the parent's geometry, sharing whatever single transform the
-      // parent ends up with.
-      const parentTransformNow = { ...current(parent?.transform), offset: parentWorldOffset }
-      const relativeOffset = relativeOffsetFromParent(parentTransformNow, point)
+      // relativeOffset is already the click point converted into the
+      // parent's own raw STL file coordinates (computed in ModelViewer.tsx
+      // via worldToLocal, which correctly inverts the mesh's full world
+      // matrix — position, rotation, scale, mirror — in one step). That's
+      // exactly what mergeChildIntoParent needs: it concatenates the
+      // pillar's geometry directly onto the parent's raw, un-recentered
+      // vertex data, so the offset baked in has to be expressed in that
+      // same raw coordinate system, not the world-space or re-centered
+      // preview coordinates.
       addFiles(
         [file],
         [{ transform: { ...identityObjectTransform(), offset: [point[0], point[1]] }, parentId, relativeOffset }],
       )
     },
-    [pillarBaseD, pillarTopD, queue, addFiles],
+    [pillarBaseD, pillarTopD, addFiles],
   )
   const transformItems = useMemo(
     () =>

@@ -240,18 +240,29 @@ export interface QueueItem {
    *  removed) simply shows as its own top-level item again, sliced
    *  independently from then on. */
   parentId?: string
-  /** For an item with parentId set: its position relative to the parent,
-   *  captured once at creation via plate-tools.ts's relativeOffsetFromParent
-   *  (frame-independent — unrotates the click point by the parent's rotation
-   *  at that moment, so the vector stays meaningful regardless of how the
-   *  parent is later transformed). This value is permanent from creation
-   *  onward — nothing recomputes it. Instead, mergeChildIntoParent (see its
-   *  own comment in plate-tools.ts) bakes it directly into the child's
-   *  vertex positions, welding the child's geometry into the parent's own
-   *  mesh before slicing or previewing. From that point there is only one
-   *  object and one instance transform — the parent's — so translation,
-   *  rotation on every axis, mirroring, and scaling of the parent all carry
-   *  the child correctly for free, including lifting it clear of the bed
+  /** For an item with parentId set: the click point's position converted
+   *  into the parent's own raw STL file coordinates — computed once, at
+   *  creation, in ModelViewer.tsx's raycast handler via
+   *  mesh.worldToLocal(hit.point), which correctly inverts the parent
+   *  mesh's full world matrix (position, rotation, scale, mirror) in one
+   *  step, plus the mesh's centeringOffset (see that variable's own
+   *  comment) to undo the re-centering the preview applies before
+   *  rendering. Getting this from the actual rendered mesh, rather than
+   *  re-deriving it by hand from the parent's transform, matters: an
+   *  earlier version computed it from the parent's post-transform world
+   *  offset alone, which is only correct if the parent's raw mesh already
+   *  happens to be centered at its own coordinate origin with its base at
+   *  local Z=0 — true for the synthetic test boxes used at the time, false
+   *  for essentially any real uploaded model, so pillars came out offset by
+   *  the parent's own bounding-box center and floating above the bed by its
+   *  own min-Z. This value is permanent from creation onward — nothing
+   *  recomputes it. Instead, mergeChildIntoParent (see its own comment in
+   *  plate-tools.ts) bakes it directly into the child's vertex positions,
+   *  welding the child's geometry into the parent's own mesh before
+   *  slicing or previewing. From that point there is only one object and
+   *  one instance transform — the parent's — so translation, rotation on
+   *  every axis, mirroring, and scaling of the parent all carry the child
+   *  correctly for free, including lifting it clear of the bed
    *  when the parent's orientation puts it there: the slicing engine's own
    *  bed-placement step (ensure_on_bed) naturally drops the *combined* rigid
    *  shape onto whichever point is now lowest, exactly like a real object

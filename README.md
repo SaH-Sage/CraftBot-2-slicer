@@ -146,6 +146,52 @@ Praktiske endringer dette fører med seg:
   skjæringen bruker, asynkront, slik at det du ser alltid stemmer med det
   som faktisk blir skåret — ikke en forenklet tilnærming som kan avvike.
 
+## Rettet: pilar plassert feil sted, og svevende over plata
+
+To ekte, beslektede feil i selve plasseringen — sammensveisingen over var
+riktig i prinsippet, men regnet ut *hvor* den skulle sveise pilaren inn feil.
+
+3D-visningen sentrerer hver modells geometri (i X/Y, rundt sin egen
+bounding box) og senker den slik at det laveste punktet havner på Z=0, før
+den vises — akkurat det motoren selv gjør med rå geometri før den bruker
+sin egen transformasjon. En opplastet STL-fil har så godt som aldri sitt
+eget origo midt i sin egen bounding box eller basen sin på Z=0 i sine egne,
+rå koordinater — det gjelder i praksis bare de syntetiske testboksene som
+ble brukt til å verifisere forrige runde. `relativeOffset` ble regnet ut
+fra det klikkede punktet i verdensrommet, MINUS foreldrenes verdensposisjon
+— men uten å korrigere for denne sentrering-og-senking-forskjellen. Det
+holdt akkurat for testboksene (som allerede sto midt i sitt eget rom,
+basert på Z=0), men var feil for en hvilken som helst ordentlig, opplastet
+modell — nøyaktig så mye feil som modellens egen sentrum var forskjøvet fra
+sitt eget origo (X/Y), og nøyaktig så mye i høyden som modellens egen
+laveste punkt var forskjøvet fra sitt eget Z=0.
+
+Rettet ved å bruke `mesh.worldToLocal(...)` på klikkpunktet — som inverterer
+nettets fulle verdensmatrise (posisjon, rotasjon, skala, speiling) i ett
+steg, langt mer robust enn å regne ut den samme inversen for hånd — og
+legge den opprinnelige sentrering/senking-forskjellen tilbake på resultatet,
+slik at man lander nøyaktig i foreldrenes egne, rå STL-fil-koordinater
+(det `mergeChildIntoParent` faktisk sveiser inn i).
+
+Fant også en *andre*, snikende feil underveis, i selve rettelsen: THREE.js
+sin `BufferGeometry.translate()` flytter også sin egen bufrede bounding-box
+i samme operasjon — så å lese `box.min.z` *etter* å ha kalt `translate()`
+med `-box.min.z` gir alltid 0 tilbake, ikke den opprinnelige verdien, siden
+det er samme objekt, ikke en kopi. Det ville ha rettet X/Y-forskyvningen,
+men latt svevingen stå igjen, av en ny grunn. Fanget dette ved å teste med
+en bevisst usentrert, ikke-null-basert testboks (i stedet for de allerede
+perfekte testboksene fra forrige runde) og se resultatet avvike — trukket ut
+den riktige rekkefølgen i en egen, testet funksjon
+(`centerAndBaseGeometry`) for å gjøre denne spesifikke feilen vanskeligere
+å innføre på nytt.
+
+Verifisert på tre nivåer: (1) den nøyaktige matematikken, mot uavhengig
+regnede forventede verdier, med null toleranse — eksakt treff, ikke bare
+«nære nok»; (2) hele sammensveisingen, med en bevisst usentrert
+testboks, ved å undersøke den resulterende geometriens bounding box
+direkte; (3) gjennom den ekte motoren, med samme usentrerte oppsett —
+utskrevet høyde stemte nøyaktig med forelder- og pilarhøyde lagt sammen.
+
 ## Pilarer grupperes under modellen de ble laget fra
 
 En pilar laget med «Klikk og plasser» vises nå ikke lenger som sitt eget,

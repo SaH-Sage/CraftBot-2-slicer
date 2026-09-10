@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
+import { STLLoader } from 'three/addons/loaders/STLLoader.js'
 import {
   boxStl,
   buildMergedStlForItem,
+  centerAndBaseGeometry,
   cylinderStl,
   fitToBed,
+  geometryToStl,
   mergeChildIntoParent,
   placeOnFace,
   rotateAboutWorldAxis,
@@ -311,5 +314,99 @@ describe('buildMergedStlForItem', () => {
     ]
     const result = await buildMergedStlForItem('main', items)
     expect(triCountOf(result)).toBe(triCountOf(mainStl.buffer.slice(mainStl.byteOffset) as ArrayBuffer))
+  })
+})
+
+describe('centerAndBaseGeometry', () => {
+  // A box occupying X 10..30, Y 20..40, Z 5..25 in its own raw coordinates —
+  // deliberately NOT centered at its own origin and NOT based at Z=0, unlike
+  // every synthetic primitive elsewhere in this file (which sit at local
+  // (0,0) / Z=0 by construction and so never exercised this code path). This
+  // is the ordinary case for a real uploaded STL.
+  function offCenterBoxGeometry() {
+    const geo = new THREE.BoxGeometry(20, 20, 20)
+    geo.translate(20, 30, 15) // -> X 10..30, Y 20..40, Z 5..25
+    geo.computeBoundingBox()
+    return geo
+  }
+
+  it('centers XY and bases Z at 0, returning the offset that was subtracted', () => {
+    const geo = offCenterBoxGeometry()
+    const offset = centerAndBaseGeometry(geo)
+    expect(offset.toArray()).toEqual([20, 30, 5])
+    geo.computeBoundingBox()
+    const box = geo.boundingBox!
+    expect(box.min.toArray()).toEqual([-10, -10, 0])
+    expect(box.max.toArray()).toEqual([10, 10, 20])
+  })
+
+  it('demonstrates why minZ must be captured before translate(): reading box.min.z afterward returns 0, not the original value', () => {
+    // This is the exact bug centerAndBaseGeometry exists to avoid — kept as
+    // a regression test against reintroducing the naive version.
+    const geo = offCenterBoxGeometry()
+    const box = geo.boundingBox!
+    const minZBefore = box.min.z
+    expect(minZBefore).toBe(5)
+    const center = box.getCenter(new THREE.Vector3())
+    geo.translate(-center.x, -center.y, -minZBefore)
+    // box is the SAME object geo.boundingBox pointed to — translate() shifts
+    // it in place, so reading it now (the naive, buggy approach) is wrong.
+    expect(box.min.z).toBe(0)
+    expect(box.min.z).not.toBe(minZBefore)
+  })
+
+  it('round-trips: adding the returned offset back to a point in the centered geometry recovers the original raw point', () => {
+    const geo = offCenterBoxGeometry()
+    const offset = centerAndBaseGeometry(geo)
+    const centeredPoint = new THREE.Vector3(3, -2, 12) // some arbitrary point in the now-centered local space
+    const rawPoint = centeredPoint.clone().add(offset)
+    expect(rawPoint.toArray()).toEqual([23, 28, 17]) // matches centeredPoint + (20,30,5) exactly
+  })
+
+  it('full pipeline: an off-center, rotated parent still gets a pillar placed exactly where clicked, not offset or floating', () => {
+    // Mirrors ModelViewer.tsx's actual sequence: load raw geometry, center
+    // it, build a mesh, position + rotate it, raycast-hit a point on it,
+    // recover that point's raw coordinates, and merge a pillar there.
+    const parentStl = geometryToStl(offCenterBoxGeometry(), 'off-center test box') // raw bytes, BEFORE any centering
+    const rawGeo = offCenterBoxGeometry()
+    const centeringOffset = centerAndBaseGeometry(rawGeo)
+    const mesh = new THREE.Mesh(rawGeo)
+    mesh.position.set(100, 50, 0)
+    mesh.rotation.set(0, 0, Math.PI / 6)
+    mesh.updateMatrixWorld(true)
+
+    // The raw top-face center (20, 30, 25) — simulate where that lands in
+    // world space after the mesh's position + rotation.
+    const rawTopCenter = new THREE.Vector3(20, 30, 25)
+    const worldClick = rawTopCenter
+      .clone()
+      .sub(new THREE.Vector3(20, 30, 5))
+      .applyEuler(mesh.rotation)
+      .add(mesh.position)
+
+    // Exactly ModelViewer.tsx's fix: worldToLocal + add back centeringOffset.
+    const relativeOffset = mesh.worldToLocal(worldClick.clone()).add(centeringOffset)
+    expect(relativeOffset.x).toBeCloseTo(20, 6)
+    expect(relativeOffset.y).toBeCloseTo(30, 6)
+    expect(relativeOffset.z).toBeCloseTo(25, 6)
+
+    // Merge a tiny pillar at that recovered point directly into the
+    // PARENT'S RAW (never-centered) STL bytes, exactly as
+    // buildMergedStlForItem does at slice/preview time.
+    const pillarGeo = new THREE.BoxGeometry(1, 1, 1)
+    pillarGeo.translate(0, 0, 0.5) // sits on its own local Z=0..1, like supportPillarStl
+    const pillarStl = geometryToStl(pillarGeo, 'tiny pillar')
+    const merged = mergeChildIntoParent(
+      parentStl.buffer.slice(parentStl.byteOffset) as ArrayBuffer,
+      pillarStl.buffer.slice(pillarStl.byteOffset) as ArrayBuffer,
+      { relativeOffset: [relativeOffset.x, relativeOffset.y, relativeOffset.z] },
+    )
+    const mergedGeo = new STLLoader().parse(merged.buffer.slice(merged.byteOffset, merged.byteOffset + merged.byteLength) as ArrayBuffer)
+    mergedGeo.computeBoundingBox()
+    // The parent's raw top is Z=25; the pillar should sit exactly on it,
+    // extending the combined shape's raw max.z to 26 — not floating above
+    // it, not shifted off to the side.
+    expect(mergedGeo.boundingBox!.max.z).toBeCloseTo(26, 5)
+    expect(mergedGeo.boundingBox!.max.x).toBeCloseTo(30, 5) // parent's own raw max.x dominates — pillar's X range [19.5, 20.5] sits entirely within it; this just confirms nothing exploded sideways
   })
 })

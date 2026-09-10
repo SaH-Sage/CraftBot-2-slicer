@@ -5,6 +5,7 @@ import {
   boxStl,
   buildMergedStlForItem,
   centerAndBaseGeometry,
+  compensatingRotationForParent,
   cylinderStl,
   fitToBed,
   geometryToStl,
@@ -16,6 +17,7 @@ import {
   toggleMirror,
 } from './plate-tools'
 import { identityObjectTransform } from './model-transforms'
+import type { ObjectTransform } from '../types'
 
 // 'ZYX', matching plate-tools.ts's own decomposition order — see the comment
 // on withRotation there for why this specific order matters: it's what the
@@ -408,5 +410,77 @@ describe('centerAndBaseGeometry', () => {
     // it, not shifted off to the side.
     expect(mergedGeo.boundingBox!.max.z).toBeCloseTo(26, 5)
     expect(mergedGeo.boundingBox!.max.x).toBeCloseTo(30, 5) // parent's own raw max.x dominates — pillar's X range [19.5, 20.5] sits entirely within it; this just confirms nothing exploded sideways
+  })
+})
+
+describe('attached pillar orientation (anchorAtTop + compensatingRotationForParent)', () => {
+  const identity: ObjectTransform = { scale: [1, 1, 1], rotation: [0, 0, 0], mirror: [1, 1, 1], offset: null }
+
+  it('anchorAtTop=true spans local Z=-height to 0 (top at origin, base hanging below) — anchorAtTop=false is unchanged', () => {
+    const top = supportPillarStl(6, 2, 15, 48, true)
+    const topGeo = new STLLoader().parse(top.buffer.slice(top.byteOffset, top.byteOffset + top.byteLength) as ArrayBuffer)
+    topGeo.computeBoundingBox()
+    expect(topGeo.boundingBox!.min.z).toBeCloseTo(-15, 5)
+    expect(topGeo.boundingBox!.max.z).toBeCloseTo(0, 5)
+
+    const base = supportPillarStl(6, 2, 15) // default anchorAtTop=false
+    const baseGeo = new STLLoader().parse(base.buffer.slice(base.byteOffset, base.byteOffset + base.byteLength) as ArrayBuffer)
+    baseGeo.computeBoundingBox()
+    expect(baseGeo.boundingBox!.min.z).toBeCloseTo(0, 5)
+    expect(baseGeo.boundingBox!.max.z).toBeCloseTo(15, 5)
+  })
+
+  it("compensatingRotationForParent exactly cancels the parent's rotation", () => {
+    const parentTransform = { ...identity, rotation: [0.3, -0.6, 1.1] as [number, number, number] }
+    const compensating = compensatingRotationForParent(parentTransform)
+    const parentQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(...parentTransform.rotation, 'ZYX'))
+    const compensatingQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(...compensating, 'ZYX'))
+    // compensating applied first (baked into the pillar's own geometry),
+    // then the parent's own rotation re-applied as the single instance
+    // transform — the two should cancel, leaving world-up unchanged.
+    const combined = parentQ.clone().multiply(compensatingQ)
+    const result = new THREE.Vector3(0, 0, 1).applyQuaternion(combined)
+    expect(result.x).toBeCloseTo(0, 5)
+    expect(result.y).toBeCloseTo(0, 5)
+    expect(result.z).toBeCloseTo(1, 5)
+  })
+
+  it('a pillar attached to a rotated parent stays vertical after the parent\'s rotation is applied — and would visibly tilt without the compensation', () => {
+    // Regression test for the reported bug: rotate the parent 45°, then add
+    // a pillar — it came out tilted at the parent's own angle instead of
+    // standing straight down to the bed. A tiny parent isolates the
+    // pillar's own extent; a rotation about X (not Z, which never changes
+    // a vertical shape's Z extent regardless of compensation) is the one
+    // that actually exercises tilt, and shows up in Y, not X.
+    const tinyParent = boxStl(0.1, 0.1, 0.1)
+    const pillar = supportPillarStl(4, 2, 20, 48, true)
+    const parentTransform = { ...identity, rotation: [Math.PI / 4, 0, 0] as [number, number, number] }
+    const parentQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(...parentTransform.rotation, 'ZYX'))
+
+    const compensating = compensatingRotationForParent(parentTransform)
+    const mergedCompensated = mergeChildIntoParent(
+      tinyParent.buffer.slice(tinyParent.byteOffset) as ArrayBuffer,
+      pillar.buffer.slice(pillar.byteOffset) as ArrayBuffer,
+      { relativeOffset: [0, 0, 0], rotation: compensating },
+    )
+    const geoC = new STLLoader().parse(mergedCompensated.buffer.slice(mergedCompensated.byteOffset, mergedCompensated.byteOffset + mergedCompensated.byteLength) as ArrayBuffer)
+    geoC.applyQuaternion(parentQ) // simulates the parent's own single instance transform at slice time
+    geoC.computeBoundingBox()
+    const yExtentCompensated = geoC.boundingBox!.max.y - geoC.boundingBox!.min.y
+    expect(yExtentCompensated).toBeCloseTo(4, 1) // just the pillar's own base diameter — stayed vertical
+
+    // Contrast: the exact same setup WITHOUT the compensating rotation —
+    // proves this test would have caught the original bug, not just that
+    // the fixed path happens to look fine.
+    const mergedUncompensated = mergeChildIntoParent(
+      tinyParent.buffer.slice(tinyParent.byteOffset) as ArrayBuffer,
+      pillar.buffer.slice(pillar.byteOffset) as ArrayBuffer,
+      { relativeOffset: [0, 0, 0] },
+    )
+    const geoU = new STLLoader().parse(mergedUncompensated.buffer.slice(mergedUncompensated.byteOffset, mergedUncompensated.byteOffset + mergedUncompensated.byteLength) as ArrayBuffer)
+    geoU.applyQuaternion(parentQ)
+    geoU.computeBoundingBox()
+    const yExtentUncompensated = geoU.boundingBox!.max.y - geoU.boundingBox!.min.y
+    expect(yExtentUncompensated).toBeGreaterThan(15) // dramatically spread sideways — the tilt this fix prevents
   })
 })

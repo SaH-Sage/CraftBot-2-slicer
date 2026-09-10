@@ -13,7 +13,7 @@ import { type ConfigField, mergeConfigLayers, resolveConfig, revertField } from 
 import { formatBytes } from './lib/format'
 import { logWarn } from './lib/log'
 import { identityObjectTransform } from './lib/model-transforms'
-import { current, placeOnFace, supportPillarStl } from './lib/plate-tools'
+import { compensatingRotationForParent, current, placeOnFace, supportPillarStl } from './lib/plate-tools'
 import { TransformPanel } from './components/TransformPanel'
 import type { ImportedProfileType } from './lib/profiles'
 import {
@@ -552,7 +552,12 @@ export default function App() {
     (point: [number, number, number], parentId: string, relativeOffset: [number, number, number]) => {
       const height = point[2]
       if (height < 1) return // clicked too close to the bed — not worth a pillar
-      const stl = supportPillarStl(pillarBaseD, pillarTopD, height)
+      // anchorAtTop=true: mergeChildIntoParent's translation places whatever
+      // is at local origin at relativeOffset (the clicked point) — for an
+      // attached pillar that has to be the pillar's TOP, not its base, or
+      // the wide end lands on the clicked point with the narrow end
+      // extending further away from the bed instead of hanging down to it.
+      const stl = supportPillarStl(pillarBaseD, pillarTopD, height, undefined, true)
       const file = new File(
         [stl.buffer as ArrayBuffer],
         `stotte-${point[0].toFixed(0)}-${point[1].toFixed(0)}-h${height.toFixed(0)}mm.stl`,
@@ -567,12 +572,21 @@ export default function App() {
       // vertex data, so the offset baked in has to be expressed in that
       // same raw coordinate system, not the world-space or re-centered
       // preview coordinates.
+      //
+      // rotation compensates for the parent's rotation at this exact
+      // moment — see compensatingRotationForParent's own comment for why: a
+      // pillar welded into the parent's raw geometry shares the parent's
+      // single instance transform at slice time, so without this the
+      // pillar comes out tilted at whatever angle the parent happens to be
+      // rotated to right now, instead of always standing vertical.
+      const parent = queue.find((q) => q.id === parentId)
+      const rotation = compensatingRotationForParent(parent?.transform)
       addFiles(
         [file],
-        [{ transform: { ...identityObjectTransform(), offset: [point[0], point[1]] }, parentId, relativeOffset }],
+        [{ transform: { ...identityObjectTransform(), rotation, offset: [point[0], point[1]] }, parentId, relativeOffset }],
       )
     },
-    [pillarBaseD, pillarTopD, addFiles],
+    [pillarBaseD, pillarTopD, queue, addFiles],
   )
   const transformItems = useMemo(
     () =>

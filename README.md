@@ -192,6 +192,60 @@ testboks, ved å undersøke den resulterende geometriens bounding box
 direkte; (3) gjennom den ekte motoren, med samme usentrerte oppsett —
 utskrevet høyde stemte nøyaktig med forelder- og pilarhøyde lagt sammen.
 
+## Rettet: pilaren pekte feil vei, og fulgte foreldrenes vinkel
+
+To til, ekte feil i selve pilar-formen — plasseringen (hvor på foreldrenes
+overflate den sitter) var riktig etter rettelsen over, men selve
+retningen den vokser i var det ikke.
+
+**Pilaren var «bakvendt».** `mergeChildIntoParent` plasserer alltid det som
+ligger i pilarens eget lokale origo (0,0,0) på det klikkede punktet — og
+`supportPillarStl` bygger formen med den brede *bunnen* i origo (Z=0) og den
+smale *toppen* lenger unna (Z=height), siden det er riktig for en
+frittstående pilar plassert direkte på plata. For en pilar som festes til en
+annen modell betyr det samme oppsettet at den brede bunnen havnet *på*
+klikkpunktet, med den smale toppen voksende videre bortover — stikk motsatt
+av en støttepilar, som skal ha sin smale topp mot modellen og brede bunn ned
+mot plata. Rettet med et nytt `anchorAtTop`-valg på `supportPillarStl`: for
+en festet pilar bygges formen nå med toppen i origo og bunnen hengende
+nedover derfra, slik at klikkpunktet riktig blir toppen, ikke bunnen.
+Frittstående pilarer (lagt til med tallverdier) er upåvirket — de bruker
+fortsatt standardoppførselen.
+
+**Pilaren fulgte foreldrenes vinkel.** Siden en festet pilar er sveiset
+direkte inn i foreldrenes egen, urotert geometri (se seksjonen lenger opp),
+har den ingen egen transformasjon igjen ved skjæring — hele den
+sammensatte formen deler én, foreldrenes. Roterer du foreldrene 45° og
+legger til en pilar, ble pilarens egen geometri bygget rett langs
+foreldrenes eget, uroterte Z-akse — som så får de samme 45° påført når
+foreldrenes rotasjon brukes på nytt ved skjæring, og pilaren kommer ut skjev
+i stedet for loddrett. Rettet ved å beregne en «motrotasjon» (nøyaktig det
+motsatte av foreldrenes rotasjon *akkurat i det øyeblikket* pilaren lages)
+og bake den inn i pilarens geometri før den sveises inn — slik at
+foreldrenes rotasjon og motrotasjonen opphever hverandre nøyaktig, og
+pilaren alltid vokser loddrett ned mot plata, uansett hvilken vinkel
+foreldrene sto i da den ble lagt til. (Roteres foreldrene *videre* etter at
+pilaren allerede er festet, følger pilaren med som en stiv del av
+geometrien — det er ikke en feil, det er nøyaktig den oppførselen «behandle
+den som en del av egen geometri» ber om; kompensasjonen gjelder øyeblikket
+pilaren opprettes, ikke for alltid.)
+
+Verifisert med samme grundighet som forrige runde: en presis test som
+bekrefter motrotasjonen opphever foreldrenes rotasjon eksakt (null
+toleranse); en kontrast-test som beviser dette faktisk ville fanget feilen
+— med motrotasjonen holder en 20 mm pilar seg innenfor sin egen 4 mm
+diameter etter at foreldrene roteres 45°, mens den uten motrotasjonen
+sprer seg over 16 mm sidelengs i stedet; og til slutt gjennom den ekte
+motoren, med scenarioet fra
+rapporten ordrett — roter 45°, legg så til en pilar — der utskriftshøyden
+stemte med en loddrett, ikke en skjev og forkortet, pilar.
+
+Én kjent begrensning, verdt å nevne: motrotasjonen kompenserer for
+foreldrenes *rotasjon*, ikke for eventuell speilvending som måtte stå på
+samtidig. Rapporten gjaldt spesifikt rotasjon, så det er det som er rettet
+nå; en pilar festet mens foreldrene også er speilvendt kan fortsatt komme
+ut skjevt.
+
 ## Pilarer grupperes under modellen de ble laget fra
 
 En pilar laget med «Klikk og plasser» vises nå ikke lenger som sitt eget,

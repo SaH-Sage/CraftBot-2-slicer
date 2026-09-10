@@ -42,6 +42,26 @@ export function current(t: ObjectTransform | undefined): ObjectTransform {
   return t ?? identityObjectTransform()
 }
 
+/**
+ * The rotation (Euler ZYX, matching this app's convention) that exactly
+ * cancels out a parent's current rotation. A pillar welded into its
+ * parent's raw geometry (see mergeChildIntoParent) has no instance
+ * transform of its own left at slice time — the whole combined shape
+ * shares one, the parent's. So if the parent is rotated 45° and a pillar's
+ * own geometry is built pointing straight along the parent's raw +Z axis,
+ * the 45° gets applied to the pillar too when the parent's rotation is
+ * later re-applied, and it comes out tilted instead of vertical. Rotating
+ * the pillar's geometry by this function's result *before* baking in
+ * relativeOffset cancels that out: parentRotation ∘ compensatingRotation
+ * = identity, so the pillar ends up pointing straight down to the bed
+ * regardless of whatever the parent's current orientation happens to be.
+ */
+export function compensatingRotationForParent(parentTransform: ObjectTransform | undefined): [number, number, number] {
+  const inverse = quaternionOf(current(parentTransform)).invert()
+  const e = new THREE.Euler().setFromQuaternion(inverse, 'ZYX')
+  return [e.x, e.y, e.z]
+}
+
 /** Rotate about a world axis by `degrees`, on top of the current rotation. */
 export function rotateAboutWorldAxis(t: ObjectTransform | undefined, axis: Axis, degrees: number): ObjectTransform {
   const cur = current(t)
@@ -320,10 +340,31 @@ export function sphereStl(diameter: number, segments = 48): Uint8Array {
  * area on the part, which snaps off after printing far more easily than a
  * uniform cylinder would.
  */
-export function supportPillarStl(baseDiameter: number, topDiameter: number, height: number, segments = 48): Uint8Array {
+/**
+ * anchorAtTop=false (default, used for a standalone pillar placed directly
+ * on the plate): spans local Z=0 (base, wide) to Z=height (top, narrow) —
+ * the usual "sits on the bed" convention every primitive in this file uses.
+ *
+ * anchorAtTop=true (used only for a pillar attached to a parent via
+ * mergeChildIntoParent): spans local Z=-height (base, wide) to Z=0 (top,
+ * narrow) instead — because mergeChildIntoParent's translation always
+ * places whatever is at local origin at the target point, and for an
+ * attached pillar that target is the clicked point on the parent's
+ * surface, which needs to be the pillar's TOP, not its base. Getting this
+ * backward is exactly what made an attached pillar's wide base land on the
+ * clicked point with its narrow top extending further away from the bed,
+ * instead of hanging down to it.
+ */
+export function supportPillarStl(
+  baseDiameter: number,
+  topDiameter: number,
+  height: number,
+  segments = 48,
+  anchorAtTop = false,
+): Uint8Array {
   const geometry = new THREE.CylinderGeometry(topDiameter / 2, baseDiameter / 2, height, segments)
   geometry.rotateX(Math.PI / 2)
-  geometry.translate(0, 0, height / 2)
+  geometry.translate(0, 0, anchorAtTop ? -height / 2 : height / 2)
   const stl = geometryToStl(geometry, `CraftBot 2 support pillar d${baseDiameter}-${topDiameter} h${height} mm`)
   geometry.dispose()
   return stl
